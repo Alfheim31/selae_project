@@ -1,6 +1,4 @@
-/* Shrinks a photo in the browser before it's uploaded: phones take
-   4000-pixel pictures, and the venue Wi-Fi doesn't need to carry them.
-   Returns a JPEG blob at most `max` pixels on its longer side. */
+/* Image resize before upload */
 export async function prepareImage(file, { max = 1800, quality = 0.84 } = {}) {
   if (!file || !/^image\//.test(file.type)) throw new Error("Choose an image file (JPEG, PNG or WebP).");
   let source;
@@ -20,7 +18,7 @@ export async function prepareImage(file, { max = 1800, quality = 0.84 } = {}) {
   canvas.width = Math.round(w * scale);
   canvas.height = Math.round(h * scale);
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fff"; // transparent PNGs get a white background, not black
+  ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   if (source.close) source.close();

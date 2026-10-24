@@ -23,8 +23,6 @@ test("a common OCR confusion still finds the right person", () => {
 });
 
 test("two near-identical numbers with an unsure digit go to the operator", () => {
-  // 41587 vs 41537 differ only in the digit OCR wasn't sure about, and it read a 5,
-  // which OCR confuses with both 8 and 3
   const conf = [0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.3, 0.95];
   const out = rank(people, "2023-41557", conf, emptyModel());
   assert.equal(out.decision, "confirm");
@@ -39,7 +37,7 @@ test("a read that looks like nobody on file is rejected", () => {
 });
 
 test("the prior prefers guests who haven't arrived over ones already inside", () => {
-  // Equally far from 2023-55555 (inside) and 2023-55565 (expected)
+  // Equally far from 2023-55555
   const pool = [{ id: "2023-55555", weight: PRIOR_WEIGHT.inside }, going("2023-55575")];
   const out = rank(pool, "2023-55565", null, emptyModel());
   assert.equal(out.top.id, "2023-55575");
@@ -59,7 +57,7 @@ test("alignment handles a dropped digit", () => {
 test("learning from corrections raises the probability of that confusion", () => {
   const model = emptyModel();
   const before = channel(model).P[4][1];
-  for (let i = 0; i < 10; i++) learn(model, "2023-11587", "2023-41587"); // 4 read as 1
+  for (let i = 0; i < 10; i++) learn(model, "2023-11587", "2023-41587");
   const after = channel(model).P[4][1];
   assert.ok(after > before * 3, `P(1|4) ${before} -> ${after}`);
   assert.equal(model.corrections, 10);
@@ -73,7 +71,7 @@ test("a correction that looks nothing like the read is not learned", () => {
 
 test("after learning, a venue-specific confusion is resolved with more confidence", () => {
   const conf = [0.9, 0.9, 0.9, 0.9, 0.5, 0.9, 0.9, 0.9, 0.9];
-  // At this venue 4 keeps getting read as 1, so a "1" should lean toward the 4-version
+  // Learned confusion
   const solo = [going("2023-41587"), going("2023-71587")];
   const fresh = rank(solo, "2023-11587", conf, emptyModel());
   const model = emptyModel();

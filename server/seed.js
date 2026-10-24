@@ -1,13 +1,7 @@
 import crypto from "node:crypto";
 import { rng as simRng, makeWorld, simulateHistory } from "./simulate.js";
 
-/* ------------------------------------------------------------------
-   First-run data: a student directory, a semester of simulated past
-   events (so the turnout forecast has history to learn from), one demo
-   event that is already 42 minutes into check-in, and an upcoming
-   workshop that is oversubscribed, with a waitlist. Same seeded generator as the original
-   prototype, so the names and student numbers are stable.
-------------------------------------------------------------------- */
+/* First-run data */
 
 function rng(seed) {
   let a = seed;
@@ -28,7 +22,7 @@ const GIVEN = ["Juan", "Andrea", "Jose", "Kevin", "Patricia", "Mark Anthony", "K
 const MIDDLES = "ABCDEFGLMNPRSTV";
 const SECTIONS = ["BSCS 1-1", "BSCS 1-2", "BSCS 2-1", "BSCS 2-2", "BSCS 3-1", "BSCS 3-2", "BSCS 3-3", "BSCS 3-4", "BSCS 4-1", "BSCS 4-2"];
 
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O or 1/I to misread
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export function newCode(len = 10) {
   const bytes = crypto.randomBytes(len);
   return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -53,7 +47,7 @@ export function buildSeed(now) {
     students.push({ id, section, last: pick(SURNAMES), first: pick(GIVEN), middle: r() < 0.1 ? "" : pick(MIDDLES),
       suffix: sr < 0.03 ? "Jr." : sr < 0.04 ? "III" : "" });
   }
-  // Names that exercise the formatting rules
+  // Showcase names
   const showcase = [
     { last: "Dela Cruz", first: "Juan", middle: "M", suffix: "" },
     { last: "Santos", first: "Maria Clara", middle: "R", suffix: "" },
@@ -79,7 +73,7 @@ export function buildSeed(now) {
     registrationOpen: true,
     hostName: "CS Student Council",
     category: "Assembly",
-    hostKeyHash: hashKey(crypto.randomBytes(16).toString("hex")), // managed from the server laptop only
+    hostKeyHash: hashKey(crypto.randomBytes(16).toString("hex")),
     createdAt: new Date(opened.getTime() - 7 * 86400000).toISOString(),
   };
 
@@ -90,7 +84,7 @@ export function buildSeed(now) {
     createdAt: new Date(opened.getTime() - Math.floor(r() * 6 * 86400000)).toISOString(), checkin: null,
   }));
 
-  // Shuffle, then check in 128 with a peak around 22 minutes after opening
+  // Check-ins
   const order = registrations.slice();
   for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const logs = [];
@@ -109,14 +103,13 @@ export function buildSeed(now) {
   });
   logs.push({ uid: newId(), eventId: event.id, time: at(31), studentId: null, outcome: "unresolved", method: "ocr" });
 
-  // A semester of past events. Separate random stream, so the names and numbers above don't change.
+  // Past events
   const hr = simRng(2026);
   const world = makeWorld(students, hr);
   const history = simulateHistory({ students, now, r: hr, world, count: 14, spacingDays: 6, endDaysAgo: 3, newId, newCode });
-  const hidden = ({ _p, _effect, ...rest }) => rest; // the simulator's ground truth stays out of the data file
+  const hidden = ({ _p, _effect, ...rest }) => rest;
   history.events.forEach((e) => { e.hostKeyHash = hashKey(crypto.randomBytes(16).toString("hex")); });
 
-  // An upcoming workshop with more sign-ups than seats: the case the waitlist release is for
   const wsStart = new Date(now.getTime() + 2 * 86400000);
   if (wsStart.getDay() === 0) wsStart.setDate(wsStart.getDate() + 1);
   if (wsStart.getDay() === 6) wsStart.setDate(wsStart.getDate() + 2);
@@ -145,7 +138,6 @@ export function buildSeed(now) {
   })).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   wsRegs.forEach((reg, k) => { if (k >= workshop.capacity) reg.status = "waitlist"; });
 
-  // More upcoming events from different hosts, so Discover has something to browse
   const UPCOMING = [
     ["hack-night", "Hack Night: Ship a Side Project", "GDG on Campus PLM", "Innovation Hub", "Hackathon", "teal", 4, 18, 80, 0.55,
       "Bring an idea, leave with a working demo. Mentors on call all night, food from 8 PM, demos at midnight."],

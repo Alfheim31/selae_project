@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
-/* Styles, formatting helpers and small pieces shared by the public
-   pages and the organizer console. */
+/* Styles */
 
 export const CSS = `
-/* In the components layer, so Tailwind utilities (hidden, md:flex, p-4…) win over these where both apply */
+/* In the components layer */
 @layer components {
 .selae{
   /* Paper and ink */
@@ -37,8 +36,7 @@ export const CSS = `
 .caps{text-transform:uppercase;letter-spacing:.02em}
 .tag{font-family:var(--f-mono);font-size:.68rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
 .mono{font-family:var(--f-mono)}
-
-/* ---- buttons ---- */
+/* buttons */
 .btn{white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font-family:var(--f-display);font-weight:600;
   font-size:1.02rem;letter-spacing:.04em;text-transform:uppercase;border-radius:8px;padding:.55rem 1.05rem;
   border:1px solid var(--line-strong);background:var(--surface);color:var(--text);transition:background .15s,border-color .15s,transform .1s}
@@ -54,11 +52,10 @@ export const CSS = `
 .iconbtn{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);
   display:inline-flex;align-items:center;justify-content:center;position:relative}
 .iconbtn:hover{border-color:var(--line-strong);background:var(--raised)}
-
-/* ---- surfaces ---- */
+/* surfaces */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 .panel-title{font-family:var(--f-display);font-weight:700;font-size:1.35rem;line-height:1.1}
-/* A ticket. A .tear inside it is the perforation, with half-circle notches cut at both edges */
+/* A ticket */
 .pass{background:var(--surface);border-radius:16px;border:1px solid var(--line);position:relative}
 .tear{position:relative;border-top:2px dashed var(--line-strong);margin:0 16px}
 .tear:before,.tear:after{content:"";position:absolute;top:-12px;width:22px;height:22px;border-radius:50%;background:var(--bg);border:1px solid var(--line)}
@@ -70,8 +67,7 @@ export const CSS = `
 .perf{border:0;border-top:2px dashed var(--line-strong);margin:0}
 .perf-v{border-left:2px dashed var(--line-strong)}
 .vtext{writing-mode:vertical-rl;transform:rotate(180deg)}
-
-/* ---- inputs ---- */
+/* inputs */
 .field{position:relative}
 .field svg{position:absolute;left:.85rem;top:50%;transform:translateY(-50%);color:var(--faint)}
 .input,.inp{background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;color:var(--text);width:100%;font:inherit;font-size:1rem}
@@ -82,8 +78,7 @@ export const CSS = `
 select.inp{appearance:auto}
 textarea.inp{resize:vertical;min-height:110px}
 .lbl{display:block;font-family:var(--f-mono);font-size:.68rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.35rem}
-
-/* ---- chips, pills, segmented ---- */
+/* chips */
 .chip{display:inline-flex;align-items:center;gap:.35rem;font-family:var(--f-mono);font-size:.7rem;font-weight:500;letter-spacing:.06em;
   text-transform:uppercase;padding:.14rem .5rem;border-radius:6px;border:1px solid var(--line-strong);color:var(--muted);white-space:nowrap;background:var(--surface)}
 .chip.qr,.chip.barcode{color:var(--accent);border-color:#B8C3F3;background:var(--accent-soft)}
@@ -102,8 +97,7 @@ textarea.inp{resize:vertical;min-height:110px}
 .seg button{border:0;background:transparent;color:var(--muted);font-family:var(--f-display);font-weight:600;letter-spacing:.04em;
   text-transform:uppercase;padding:.3rem .75rem;border-radius:7px;font-size:.92rem}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--accent);box-shadow:0 1px 3px rgba(20,27,58,.12)}
-
-/* ---- tables and lists ---- */
+/* tables and lists */
 .tbl{width:100%;border-collapse:separate;border-spacing:0}
 .tbl th{white-space:nowrap;font-family:var(--f-mono);font-weight:500;color:var(--faint);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
   text-align:left;padding:.6rem .9rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:1}
@@ -112,13 +106,11 @@ textarea.inp{resize:vertical;min-height:110px}
 .tbl tbody tr:hover td{background:#F8F9FD}
 .feed li{display:grid;grid-template-columns:22px 1fr auto;gap:.65rem;padding:.7rem 0;border-bottom:1px solid var(--line)}
 .feed li:last-child{border-bottom:0}
-
-/* ---- capacity bar ---- */
+/* capacity bar */
 .capbar{height:14px;border-radius:999px;background:var(--raised);border:1px solid var(--line);position:relative;overflow:hidden}
 .capfill{height:100%;border-radius:999px;transition:width .5s ease}
 .captick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text)}
-
-/* ---- top bar ---- */
+/* top bar */
 .topbar{position:sticky;top:0;z-index:30;background:rgba(237,240,246,.86);backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:.6rem;background:none;border:0;color:inherit;padding:0}
 .brand .word{font-family:var(--f-display);font-weight:700;font-size:1.5rem;letter-spacing:.08em}
@@ -142,14 +134,12 @@ textarea.inp{resize:vertical;min-height:110px}
 .notif:hover{background:var(--raised)}
 .notif.unread{background:#F5F7FF}
 .notif .ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)}
-
-/* ---- layout ---- */
+/* layout */
 .wrap{max-width:1120px;margin-left:auto;margin-right:auto;padding-left:16px;padding-right:16px}
 .narrow{max-width:780px;margin-left:auto;margin-right:auto;padding-left:16px;padding-right:16px}
 .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem}
 .page-title{font-family:var(--f-display);font-weight:700;font-size:clamp(2.6rem,7vw,4.2rem);line-height:.9;letter-spacing:.01em;text-transform:uppercase}
-
-/* ---- sky art: covers and heroes ---- */
+/* sky art */
 .cover{position:relative;border-radius:14px;overflow:hidden;background:var(--c-bg);aspect-ratio:1/1;display:flex;align-items:flex-end;
   padding:1.1rem;color:#fff;isolation:isolate}
 .cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
@@ -164,7 +154,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .cover.wide{aspect-ratio:16/9}
 .cal-av{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--f-display);
   font-weight:700;font-size:1.3rem;background:var(--c-bg);flex-shrink:0}
-/* Departure board: the next events at a glance */
+/* Departure board */
 .board{background:#111940;color:#EAF0FB;border-radius:14px;overflow:hidden;box-shadow:0 26px 50px -20px rgba(14,20,60,.7);font-size:.92rem}
 .board-head,.board-row{display:grid;grid-template-columns:76px minmax(0,1fr) 112px 92px;gap:.8rem;align-items:center;padding:.62rem 1rem}
 .board-head{font-family:var(--f-mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:#8E9AD0;background:#0B1234}
@@ -174,8 +164,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 @media (max-width:640px){.board-head,.board-row{grid-template-columns:64px minmax(0,1fr) 84px}}
 .cover.thumb{width:76px;height:76px;aspect-ratio:auto;padding:0;border-radius:10px;flex-shrink:0}
 .sky{background:var(--g-sky);color:#fff;position:relative;overflow:hidden;isolation:isolate}
-
-/* ---- event pass (list card) ---- */
+/* event pass (list card) */
 .evpass{display:block;width:100%;text-align:left;color:inherit;border:0;padding:0;background:transparent;cursor:pointer;
   filter:drop-shadow(0 1px 0 rgba(20,27,58,.05)) drop-shadow(0 10px 18px rgba(20,27,58,.08));transition:transform .15s}
 .evpass:hover{transform:translateY(-2px)}
@@ -199,8 +188,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .datebox{width:54px;flex-shrink:0;text-align:center;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
 .datebox .mo{font-family:var(--f-mono);font-size:.62rem;letter-spacing:.14em;background:var(--accent);color:#fff;padding:.14rem 0}
 .datebox .dy{font-family:var(--f-display);font-size:1.5rem;font-weight:700;padding:.1rem 0}
-
-/* ---- category tiles and calendars ---- */
+/* category tiles and calendars */
 .cat{display:flex;flex-direction:column;justify-content:space-between;gap:1rem;padding:1rem;border-radius:14px;border:1px solid var(--line);
   background:var(--surface);text-align:left;color:inherit;min-height:118px;transition:border-color .15s,transform .15s;box-shadow:var(--shadow)}
 .cat:hover{border-color:var(--accent);transform:translateY(-2px)}
@@ -213,8 +201,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .cal .av{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;
   font-family:var(--f-display);font-weight:700;font-size:1.4rem;background:var(--c-bg)}
 .cal[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent),var(--shadow)}
-
-/* ---- slide-over drawer ---- */
+/* slide-over drawer */
 .drawer-bg{position:fixed;inset:0;background:rgba(20,27,58,.28);z-index:45;animation:fade .2s ease}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--bg);z-index:46;display:flex;flex-direction:column;
   box-shadow:-24px 0 48px -16px rgba(20,27,58,.35);animation:slidein .28s cubic-bezier(.2,.8,.2,1)}
@@ -224,8 +211,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .drawer .dfoot .btn{flex:1}
 @keyframes slidein{from{transform:translateX(100%)}to{transform:translateX(0)}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
-
-/* ---- organizer console ---- */
+/* organizer console */
 .rail{background:var(--g-pass);color:#fff;position:relative;border-right:2px dashed rgba(255,255,255,.45)}
 .rail .tag{color:rgba(255,255,255,.7)}
 .mark{width:34px;height:34px;border-radius:9px;position:relative;background:var(--accent);flex-shrink:0}
@@ -243,8 +229,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .boarding{border-radius:16px;overflow:hidden;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
 .boarding .band{background:var(--g-pass);color:#fff;padding:1.1rem 1.25rem;position:relative;overflow:hidden}
 .boarding .band .tag{color:rgba(255,255,255,.72)}
-
-/* ---- gate scanner ---- */
+/* gate scanner */
 .viewfinder{position:relative;border-radius:14px;overflow:hidden;aspect-ratio:4/3;border:1px solid #1E2A55;
   background:radial-gradient(ellipse at 50% 38%,#26336a 0%,#141c40 55%,#0b1130 100%);color:#EEF1FA}
 .frame{position:absolute;left:18%;right:18%;top:16%;bottom:16%}
@@ -318,8 +303,7 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .hold .fill{position:absolute;left:0;top:0;bottom:0;background:var(--lime)}
 .demo summary{cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);list-style:none}
 .demo summary::-webkit-details-marker{display:none}
-
-/* ---- dialogs and feedback ---- */
+/* dialogs and feedback */
 .modal-bg{position:fixed;inset:0;background:rgba(20,27,58,.42);backdrop-filter:blur(3px);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;animation:fade .18s ease}
 .modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;padding:1.25rem;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 30px 60px -20px rgba(20,27,58,.45)}
 .modal.scan{max-width:1180px;padding:0;display:flex;flex-direction:column;background:var(--bg)}
@@ -354,7 +338,6 @@ code{font-family:var(--f-mono);font-size:.88em;background:var(--raised);padding:
 .lightbox{position:fixed;inset:0;background:rgba(11,17,48,.92);z-index:70;display:flex;align-items:center;justify-content:center;padding:24px}
 .lightbox img{max-width:100%;max-height:100%;border-radius:10px}
 .lightbox .iconbtn{position:absolute;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff}
-
 @media print{
   .selae{background:#fff;color:#000} .rail,.selae header,.topbar,.noprint{display:none !important}
   .testcard{border:1px solid #999;break-inside:avoid}
@@ -388,7 +371,7 @@ export const formatName = (s) =>
 export const norm = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 export const pct = (n) => `${Math.round((Number.isFinite(n) ? n : 0) * 100)}%`;
 
-// Same rules the server applies, so the preview matches what gets saved
+// Name formatting
 export function tidyName(raw) {
   const s = String(raw || "").trim().replace(/\s+/g, " ");
   if (!s) return "";
@@ -406,22 +389,17 @@ export function lev(a, b) {
   return d[a.length][b.length];
 }
 
-// Simulated OCR output for the demo scenarios (the ID on screen is a drawing, so
-// there is nothing real to read). Swaps digits OCR commonly confuses under glare.
-// The read is then matched by the real matcher on the server.
 const CONFUSE = { 0: "8", 1: "7", 2: "7", 3: "8", 4: "9", 5: "6", 6: "5", 7: "1", 8: "3", 9: "4" };
 const rand = (a, b) => a + Math.random() * (b - a);
 export function simulateRead(id, kind, twin) {
   const digits = id.replace(/\D/g, "").split("");
   const conf = digits.map(() => rand(0.88, 0.99));
   if (kind === "hard" && twin) {
-    // Smudge exactly where this guest's number differs from a look-alike guest's,
-    // so the read sits between the two (alternately looking like each one)
     const other = twin.replace(/\D/g, "");
     const diffs = digits.map((d, i) => (d !== other[i] ? i : -1)).filter((i) => i >= 0);
     diffs.forEach((i, k) => { if (k % 2 === 1) digits[i] = other[i]; conf[i] = rand(0.25, 0.4); });
   } else {
-    // One glare-damaged digit, years excluded
+    // Single glare digit
     const i = 4 + Math.floor(Math.random() * 5);
     digits[i] = CONFUSE[digits[i]];
     conf[i] = rand(0.45, 0.7);
@@ -437,7 +415,6 @@ export const OUTCOME_LABEL = {
 };
 
 /* ---------------- event covers: sky art ---------------- */
-// Keys are kept from the first version so old data files still work; each is now a sky
 export const COLORS = {
   gold: ["#E4F68A", "#9CC9E6", "#4F64D6"], blue: ["#B9D7F0", "#6E8BEA", "#2C3FB5"], green: ["#DDF3C5", "#7FCBC0", "#3C6FC4"],
   rose: ["#F6D3B8", "#C79BE0", "#4C4FC4"], violet: ["#EED9AE", "#8C9BF2", "#3A3FA8"], teal: ["#CFEFF2", "#5FB4D6", "#2B4FB0"],
@@ -445,7 +422,6 @@ export const COLORS = {
 export const COLOR_NAMES = { gold: "Dawn", blue: "Noon", green: "Lagoon", rose: "Sunset", violet: "Dusk", teal: "Harbor" };
 export const skyOf = (key) => { const [a, b, c] = COLORS[key] || COLORS.gold; return `linear-gradient(180deg, ${a} 0%, ${b} 45%, ${c} 100%)`; };
 
-/** Thin contrail lines, like a plane's trail across the sky. */
 export function Trails({ seed = "selae", opacity = 0.7 }) {
   const h = hashOf(seed);
   const y = 18 + (h % 30), y2 = 60 + ((h >> 5) % 25), bend = 30 + ((h >> 9) % 40);
@@ -475,7 +451,6 @@ export function Cover({ event, thumb = false, className = "", showTitle = true }
   );
 }
 
-/** A decorative barcode drawn from a string, so each ticket's looks different. */
 export function Barcode({ value, height = 34, color = "currentColor", className = "" }) {
   const bars = [];
   let x = 0, h = hashOf(value);
@@ -490,7 +465,6 @@ export function Barcode({ value, height = 34, color = "currentColor", className 
   );
 }
 
-/** A short "flight number" for an event, for the boarding-pass styling. */
 export const flightNo = (id) => `SL ${String(hashOf(id) % 9000 + 1000)}`;
 
 export function Mark() {
@@ -518,7 +492,7 @@ export function useHashRoute() {
   const read = () => (typeof window === "undefined" ? "" : window.location.hash.replace(/^#\/?/, ""));
   const [route, setRoute] = useState(read);
   useEffect(() => {
-    // Opening an event's slide-over, a manage tab or the scanner keeps your place; a new page starts at the top
+    // Scroll on page change
     const headOf = (r) => { const [a, b] = r.split("/"); return a === "m" ? `m/${b}` : a || "events"; };
     let last = headOf(read());
     const on = () => { const r = read(); const head = headOf(r); setRoute(r); if (head !== last) window.scrollTo(0, 0); last = head; };

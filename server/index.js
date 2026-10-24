@@ -6,8 +6,7 @@ import { fileURLToPath } from "node:url";
 import { openStore } from "./store.js";
 import { createApi } from "./api.js";
 
-/* Venue server: serves the built app (dist/) and the API on one port.
-   Run with `npm start`, which builds first. */
+/* Venue server */
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
@@ -27,7 +26,7 @@ http.createServer(async (req, res) => {
   try {
     if ((await api(req, res, null)) || res.writableEnded || res.headersSent) return;
   } catch (e) {
-    // Never let one bad request take the gate down mid-event
+    // Request errors
     console.error(e);
     if (!res.headersSent) { res.statusCode = 500; res.end(); }
     return;

@@ -5,14 +5,7 @@ import { forecastNow } from "../server/forecast.js";
 import { api } from "./api.js";
 import { pct, formatName } from "./shared.jsx";
 
-/* ------------------------------------------------------------------
-   Turnout forecast and waitlist release (the model is server/forecast.js).
-
-   The server sends each registration's chance of showing up and the
-   arrival curve from past events; the browser re-runs the forecast
-   every few seconds, because "not here yet" changes the odds as
-   check-in goes on.
-------------------------------------------------------------------- */
+/* Turnout forecast and waitlist release */
 
 const chartTip = { background: "#FFFFFF", border: "1px solid #DCE2EE", borderRadius: 10, color: "#141B3A", boxShadow: "0 12px 28px -12px rgba(20,27,58,.3)" };
 const RISKS = [[0.01, "1%"], [0.05, "5%"], [0.1, "10%"]];
@@ -27,7 +20,6 @@ export function useForecast(data, now, risk) {
   }, [data, now, risk]);
 }
 
-/** A guest's chance of coming, with what drove it on hover. */
 export function Likely({ p, why, compact = false }) {
   if (p == null) return null;
   const color = p >= 0.7 ? "var(--ok)" : p >= 0.4 ? "var(--muted)" : "var(--warn)";
@@ -171,7 +163,6 @@ function TurnoutPanelInner({ data, f, risk, setRisk, refresh, onToast }) {
   );
 }
 
-/* For Analytics: how well the model does on events it wasn't trained on, and what it learned. */
 export function TurnoutModelPanel({ forecast }) {
   if (!forecast) return null;
   const { model } = forecast;

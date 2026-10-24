@@ -70,7 +70,6 @@ test("features for an event only use events before it", () => {
   const now = new Date();
   const data = buildSeed(now);
   const { rows, past } = buildExamples(data, now);
-  // In the first past event nobody has any history yet: everyone is a first-timer
   const first = rows.filter((r) => r.eventId === past[0].id);
   assert.ok(first.length > 0);
   assert.ok(first.every((r) => r.x[3] === 1));

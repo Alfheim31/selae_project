@@ -50,14 +50,11 @@ export function HoldToExit({ onExit }) {
   );
 }
 
-
 /* ---------------- live camera ---------------- */
-/* Opens the webcam and shows the feed. It does not decode anything yet:
-   identification still runs through the demo scenarios below. */
 export function useCamera(enabled, deviceId) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const [state, setState] = useState("off"); // off | starting | live | denied | notfound | insecure | error
+  const [state, setState] = useState("off");
   const [detail, setDetail] = useState("");
   const [devices, setDevices] = useState([]);
 
@@ -74,7 +71,7 @@ export function useCamera(enabled, deviceId) {
     if (!enabled) { stop(); setState("off"); return; }
 
     if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      // getUserMedia only exists on https or localhost
+      // Secure context check
       setState("insecure");
       return;
     }
@@ -125,7 +122,7 @@ export function useCamera(enabled, deviceId) {
 export function CameraStage({ cam, phase, card, glare, onRetry, onUseIllustration }) {
   const { videoRef, state, detail } = cam;
   const live = state === "live";
-  const showIllustration = !live && state === "off" && card !== undefined && false; // reserved
+  const showIllustration = !live && state === "off" && card !== undefined && false;
 
   if (state === "starting") {
     return (

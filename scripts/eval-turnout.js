@@ -1,27 +1,5 @@
 #!/usr/bin/env node
-/* ------------------------------------------------------------------
-   Evaluates the turnout forecast and waitlist release (server/forecast.js).
-
-   npm run eval:turnout
-     Simulates several separate "worlds" (default 5), each a long history of oversubscribed events (server/simulate.js:
-     every student has a hidden reliability, and the true show-up chance
-     depends on things the model can and can't see). Then walks forward
-     through the last events one at a time: train on everything that
-     finished before the event, predict it, compare with what happened.
-
-     1. Prediction: who comes, against two simpler predictors
-          - the average show-up rate of past events
-          - each person's own past show-up rate
-     2. Decision: how many people to let in off the waitlist, against
-          - no release (only cancellations free a seat; what SELAE did before)
-          - a fixed 15% overbook
-          - capacity divided by the average show-up rate
-          - the forecast without event-level swings (attendees independent)
-        Each policy is replayed many times on the true show-up chances,
-        counting empty seats and people turned away at the gate.
-
-   Options: --worlds 5  --events 40  --test 12  --students 400  --seed 11  --runs 400
-------------------------------------------------------------------- */
+/* Evaluates the turnout forecast and waitlist release */
 import crypto from "node:crypto";
 import { rng, makeWorld, simulateHistory, trueShowProb } from "../server/simulate.js";
 import { trainTurnout, predictEvent, forecastNow, auc, brier, logLoss } from "../server/forecast.js";
@@ -62,13 +40,13 @@ for (let world_i = 0; world_i < WORLDS; world_i++) {
   const testEvents = hist.events.slice(-TEST);
 
   for (const event of testEvents) {
-    // What SELAE would know the day before: everything that finished earlier, no outcomes for this event
+    // Train on earlier events
     const asOf = new Date(new Date(event.startsAt).getTime() - 86400000);
     const model = trainTurnout(data, asOf);
     const regs = data.registrations.filter((x) => x.eventId === event.id && x.status !== "cancelled");
     const preds = predictEvent(model, data, event);
 
-    // 1. Prediction quality on the people who were going (their outcome is known)
+    // Prediction
     for (const reg of regs.filter((x) => x.status === "going")) {
       const h = (model.hist.get(reg.studentId) || []).filter((e) => e.start < new Date(event.startsAt).getTime());
       rowsModel.push(preds[reg.id].p);
@@ -77,7 +55,7 @@ for (let world_i = 0; world_i < WORLDS; world_i++) {
       ys.push(reg.checkin ? 1 : 0);
     }
 
-    // 2. Decisions, replayed against the true show-up chances (waitlisted people as if they'd been let in)
+    // Decisions
     const going = regs.filter((x) => x.status === "going");
     const waitlist = regs.filter((x) => x.status === "waitlist").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const truth = (reg, promoted) => trueShowProb(world, byId.get(reg.studentId), event,

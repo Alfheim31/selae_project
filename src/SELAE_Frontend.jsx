@@ -17,22 +17,7 @@ import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "./forecast
 import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox } from "./public.jsx";
 import { prepareImage } from "./images.js";
 
-/* ------------------------------------------------------------------
-   SELAE — Smart Event Logistics and Analytics Engine
-
-   Public side (phones on the venue Wi-Fi): your events, discover,
-   event details in a slide-over, register, get a boarding-pass ticket.
-   Organizer side (the laptop at the gate): live dashboard with the
-   scanner in a modal, analytics, photos, test tickets, settings.
-
-   Routes (hash-based, so any static server works):
-     #/  #/events/:id     your events (+ details slide-over)
-     #/discover[/:id]     discover (+ details slide-over)
-     #/e/:id              event page    #/t/:code     ticket
-     #/create             create event  #/m/:id/:tab  manage an event
-     #/m/:id/scan         dashboard with the scanner open
-     #/host/:id/:key      accept a co-host link
-------------------------------------------------------------------- */
+/* SELAE — Smart Event Logistics and Analytics Engine */
 
 const TABS = ["dashboard", "analytics", "photos", "tickets", "settings"];
 const LEGACY = { dashboard: "dashboard", scanner: "scan", analytics: "analytics", testids: "tickets" };
@@ -42,7 +27,7 @@ export default function App() {
   const route = useHashRoute();
   const parts = route.split("/").filter(Boolean);
 
-  // Old single-event links (#scanner etc.) open the demo event
+  // Legacy links
   useEffect(() => {
     if (parts.length === 1 && LEGACY[parts[0]]) go(`m/demo-ga/${LEGACY[parts[0]]}`);
     if (parts[0] === "host" && parts[1] && parts[2]) { hostKeys.add(parts[1], parts[2]); go(`m/${parts[1]}`); }
@@ -109,7 +94,6 @@ function useManage(id) {
     rev.current = null;
     setState(null);
     refresh();
-    // Poll so registrations from phones and check-ins from other gates show up within ~2 seconds
     const t = setInterval(refresh, 2000);
     return () => clearInterval(t);
   }, [refresh]);
@@ -239,13 +223,11 @@ function Manage({ id, tab, scan }) {
   );
 }
 
-/* The gate scanner opens over the dashboard rather than replacing it.
-   Locked (gate) mode keeps volunteers from closing it by accident. */
 function ScannerModal({ event, locked, onClose, children }) {
   useEffect(() => {
     const esc = (e) => {
       if (e.key !== "Escape" || locked) return;
-      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; // Escape there clears the field
+      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
       onClose();
     };
     document.addEventListener("keydown", esc);
@@ -368,7 +350,7 @@ function useShareBase() {
   const [lan, setLan] = useState(null);
   useEffect(() => {
     api.info().then((i) => {
-      // On the server laptop, localhost links won't open on phones: use the Wi-Fi address instead
+      // Share link base
       if (i.isLocal && i.lanUrls.length) { setBase(i.lanUrls[0]); setLan(true); } else setLan(!i.isLocal);
     }).catch(() => setLan(false));
   }, []);
@@ -669,8 +651,7 @@ function makeActions(data) {
       const pool = data.going.filter((r) => !r.checkin);
       return pool.length ? withStudent(rnd(pool)) : null;
     },
-    // For the "hard read" demo: a guest whose student number is closest to another guest's,
-    // the case where OCR alone genuinely can't tell two people apart
+    // Closest pair (hard-read demo)
     closestPair() {
       const pool = data.going.filter((r) => !r.checkin).map((r) => r.studentId);
       let best = null;
@@ -696,7 +677,7 @@ function makeActions(data) {
 function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const { checkins, capacity, event } = data;
   const actions = useMemo(() => makeActions(data), [data]);
-  const [phase, setPhase] = useState("idle"); // idle | barcode | ocr | checking | result
+  const [phase, setPhase] = useState("idle");
   const [result, setResult] = useState(null);
   const [card, setCard] = useState(null);
   const [glare, setGlare] = useState(false);
@@ -706,13 +687,13 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const live = cam.state === "live";
   const cameraUsable = cameraOn && cam.state !== "off";
   const [sound, setSound] = useState(true);
-  const [path, setPath] = useState([]); // pipeline steps reached
+  const [path, setPath] = useState([]);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef(null);
   const timers = useRef([]);
-  const scanToken = useRef(0); // ignores server replies for a scan that was reset in the meantime
-  const pendingScan = useRef(null); // an OCR read nobody matched; the next manual entry tells the matcher who it was
+  const scanToken = useRef(0);
+  const pendingScan = useRef(null);
   const beep = useBeep(sound);
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
@@ -729,7 +710,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
 
   const show = (r) => { setResult(r); setPath((p) => [...p, "result"]); setPhase("result"); cam.freeze(); };
 
-  // The final decision is made by the server (Logical Layer): registration, waitlist, duplicates, capacity
+  // Check-in decision
   const decide = async (target, method, confidence, opts = {}) => {
     const token = ++scanToken.current;
     setPhase("checking");
@@ -760,7 +741,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     }
   };
 
-  // A code was decoded from the live camera feed: a SELAE QR ticket, or a student ID barcode
   const handleDecoded = (raw) => {
     clearTimers();
     pendingScan.current = null;
@@ -781,7 +761,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     onDetect: handleDecoded,
   });
 
-  // The intelligent part: send what OCR read to the server's Bayesian matcher and act on its decision
+  // OCR match
   const matchRead = async (read, conf, source) => {
     const token = scanToken.current;
     setPath((p) => [...p.filter((x) => x !== "match"), "match"]);
@@ -811,8 +791,8 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     }
   };
 
-  // Operator pressed "Read printed number": OCR the current frame
-  const [ocrState, setOcrState] = useState("idle"); // idle | loading | error
+  // Read printed number
+  const [ocrState, setOcrState] = useState("idle");
   useEffect(() => { if (live) warmUpOcr(); }, [live]);
   const readPrinted = async () => {
     if (!live || phase !== "idle" || result) return;
@@ -876,7 +856,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     later(() => { setPhase("ocr"); setPath(["barcode", "ocr"]); }, 1100);
     later(() => {
       if (kind === "ocr" || kind === "lowconf") {
-        // Simulated OCR output (the card on screen is a drawing), but the matching and decision are real
+        // Demo OCR read
         const { read, conf } = simulateRead(student.id, kind === "ocr" ? "glare" : "hard", twin);
         matchRead(read, conf, "demo");
       } else {
@@ -913,7 +893,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Gate header: event context and live headcount stay visible */}
+      {/* Gate header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <div>
@@ -972,7 +952,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
               </>
             ) : cameraOn && cam.state !== "starting" ? (
               <>
-                {/* No feed: the illustrated ID keeps the demo scenarios legible */}
+                {/* No feed */}
                 <div className={`idcard ${card ? "" : "away"}`} aria-hidden="true">
                   <div className="band">UNIVERSITY STUDENT ID</div>
                   <div className="photo" />
@@ -1002,7 +982,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
           </div>
         </div>
 
-        {/* Result panel: sits right under the camera on small screens */}
+        {/* Result panel */}
         <div className="lg:col-span-2 lg:row-span-2 min-w-0" aria-live="assertive">
           <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} onReset={reset}
             onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
@@ -1059,11 +1039,9 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   );
 }
 
-// Posteriors very close to 1 would round to "100%", which overstates certainty
 const sure = (p) => (p >= 0.995 ? "over 99%" : pct(p));
 const STATUS_NOTE = { inside: "Already checked in", waitlist: "On the waitlist", notreg: "Not registered for this event" };
 
-/** A candidate's student number with the digits that differ from the OCR read underlined. */
 function DigitDiff({ id, read }) {
   const a = id.replace(/\D/g, ""), b = String(read).replace(/\D/g, "");
   if (a.length !== b.length) return <span>{id}</span>;
@@ -1292,7 +1270,7 @@ function Analytics({ data, now, onToast, refresh }) {
       });
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     try {
-      // BOM keeps ñ intact when the file is opened in Excel
+      // CSV download
       const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
       const a = document.createElement("a");
       a.href = url;
@@ -1416,8 +1394,7 @@ function Analytics({ data, now, onToast, refresh }) {
 }
 
 /* ---------------- intelligent matcher ---------------- */
-/* How the OCR matcher (server/matcher.js) is doing at this event, and
-   what it has learned from operator corrections so far. */
+/* OCR matcher panel */
 const DECISION_LABEL = { auto: "Identified automatically", confirm: "Asked the operator", reject: "No confident match" };
 const RESOLUTION_LABEL = { auto: "auto", confirmed: "operator picked", manual: "typed by operator", none: "none of these" };
 
@@ -1489,8 +1466,6 @@ function MatcherPanel({ m, onToast, refresh }) {
 }
 
 /* ---------------- test tickets ---------------- */
-/* Live QR codes for guests of this event, so the scanner can be tested
-   and demoed without anyone's phone. Groups update as people check in. */
 function TestTickets({ data, eventId, onOpenScanner }) {
   const groups = useMemo(() => {
     const ticket = (r) => ({ key: r.id, student: data.student(r.studentId), value: `SELAE1:${eventId}:${r.code}` });

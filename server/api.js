@@ -5,16 +5,7 @@ import { newCode, newId, hashKey } from "./seed.js";
 import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./matcher.js";
 import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./forecast.js";
 
-/* ------------------------------------------------------------------
-   Logical layer: every rule about events, registration and check-in.
-
-   Who can do what:
-   - Anyone on the network can browse public events, register, and
-     view or cancel their own ticket (the ticket code is the secret).
-   - Managing an event (dashboard, scanner, edits) needs that event's
-     host key, which the creator's browser keeps. The laptop running
-     the server (requests from localhost) can manage every event.
-------------------------------------------------------------------- */
+/* Logical layer */
 
 const COLORS = ["gold", "blue", "green", "rose", "violet", "teal"];
 export const CATEGORIES = ["Workshop", "Talk", "Hackathon", "Study jam", "Career", "Social", "Assembly", "Competition", "General"];
@@ -32,8 +23,6 @@ const fail = (status, message) => { throw new HttpError(status, message); };
 const isLocal = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
 
 /* ---------- name standardization (Surname, Given M.) ---------- */
-// Typed in all-lowercase or all-caps gets title-cased; anything with
-// deliberate mixed case (McDonald, DelaCruz) is kept as typed.
 function tidyName(raw) {
   const s = String(raw || "").trim().replace(/\s+/g, " ");
   if (!s) return "";
@@ -159,7 +148,6 @@ function checkIn(data, event, body) {
 /* ---------- OCR matching (see matcher.js) ---------- */
 const MAX_SCANS = 3000;
 
-/** Everyone the OCR read could belong to, each with a prior weight from this event. */
 function peopleFor(data, event) {
   const regs = new Map();
   for (const r of data.registrations) if (r.eventId === event.id && r.status !== "cancelled") regs.set(r.studentId, r);
@@ -194,16 +182,13 @@ function matchRead(data, event, body) {
   };
 }
 
-/** A check-in that came from an OCR scan: record who it turned out to be, and learn when a person said so. */
 function resolveScan(data, event, body, method, studentId) {
   if (!body.scanId) return;
   const scan = (data.ocrScans || []).find((s) => s.id === body.scanId && s.eventId === event.id);
-  // "none" means the operator rejected every candidate; typing the right student afterwards still labels it
   if (!scan || (scan.resolution && scan.resolution !== "none")) return;
   scan.resolution = method === "ocr" ? "auto" : method === "confirmed" ? "confirmed" : "manual";
   scan.truth = studentId;
   scan.rank = scan.candidates.findIndex((c) => c.id === studentId);
-  // Only a human's answer is a label worth learning from; the matcher's own guesses are not
   if (method === "confirmed" || method === "manual") scan.learned = learn(ensureModel(data), scan.read, studentId);
 }
 
@@ -221,7 +206,7 @@ function matcherSummary(data, eventId) {
     scans: {
       total: scans.length,
       auto: by("decision", "auto"), confirm: by("decision", "confirm"), reject: by("decision", "reject"),
-      // Of the reads a person resolved, where was the right student in SELAE's ranking?
+      // Labelled reads
       labelled: labelled.length,
       top1: labelled.filter((s) => s.rank === 0).length,
       top3: labelled.filter((s) => s.rank >= 0).length,
@@ -246,7 +231,6 @@ async function readBody(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { fail(400, "Invalid JSON."); }
 }
 
-/** An uploaded image as raw bytes (the browser resizes it first). Checks the type from the bytes themselves. */
 async function readImage(req, limit = 8 * 1024 * 1024) {
   const type = String(req.headers["content-type"] || "").split(";")[0].trim();
   if (!IMAGE_TYPES[type]) fail(415, "Upload a JPEG, PNG or WebP image.");
@@ -278,9 +262,6 @@ function lanUrls(req) {
 }
 
 /* ---------- notifications ---------- */
-/* Built fresh from the data on each request, so there is nothing to store or
-   clean up. The browser remembers when it last opened the list and shows
-   anything newer as unread. */
 function notificationsFor(data, req, body) {
   const now = Date.now();
   const DAY = 86400000;
@@ -308,7 +289,7 @@ function notificationsFor(data, req, body) {
   // Events this device hosts
   for (const e of data.events) {
     if (!canManage(req, e) || e.simulated) continue;
-    // The server laptop manages every event; without this event's own host key, only mention ones happening soon
+    // Host notices
     const ownKey = String(req.headers["x-selae-host-key"] || "").split(",").some((k) => k.trim() && hashKey(k.trim()) === e.hostKeyHash);
     const soon = new Date(e.startsAt).getTime() - now < 3 * DAY;
     if (!ownKey && !soon && new Date(e.endsAt).getTime() > now) continue;
@@ -335,7 +316,6 @@ function notificationsFor(data, req, body) {
 }
 
 /* ---------- turnout forecast (see forecast.js) ---------- */
-// Retrained only when the set of finished events or their outcomes change, not on every check-in
 function historyKey(data, now) {
   const past = new Set(data.events.filter((e) => new Date(e.endsAt) < now).map((e) => e.id));
   let regs = 0, came = 0;
@@ -414,7 +394,7 @@ export function createApi(store) {
       return publicEvent(store.data, req, event);
     }],
 
-    // Cover photo, set by a host
+    // Cover photo
     ["POST", /^\/api\/events\/([\w-]+)\/cover$/, async (req, [id]) => {
       const event = findEvent(id);
       requireManage(req, event);
@@ -433,7 +413,7 @@ export function createApi(store) {
       return publicEvent(store.data, req, event);
     }],
 
-    // Photos from the event, added by a host once it has ended
+    // Event photos
     ["POST", /^\/api\/events\/([\w-]+)\/photos$/, async (req, [id]) => {
       const event = findEvent(id);
       requireManage(req, event);
@@ -453,7 +433,7 @@ export function createApi(store) {
       return { ok: true };
     }],
 
-    // What's new for this device: its tickets, the events it hosts, and the calendars it follows
+    // Notifications
     ["POST", /^\/api\/notifications$/, async (req) => {
       const b = await readBody(req);
       return { now: new Date().toISOString(), items: notificationsFor(store.data, req, b) };
@@ -500,8 +480,7 @@ export function createApi(store) {
         const wasGoing = reg.status === "going";
         reg.status = "cancelled";
         const event = d.events.find((e) => e.id === reg.eventId);
-        // A spot opened up: the longest-waiting person on the waitlist gets it. If seats were
-        // released off the forecast and the event is still over capacity, nobody moves up.
+        // Promote from waitlist
         if (wasGoing && event && counts(d, reg.eventId).going < event.capacity) {
           const next = d.registrations
             .filter((r) => r.eventId === reg.eventId && r.status === "waitlist")
@@ -551,7 +530,7 @@ export function createApi(store) {
       return { ok: true };
     }],
 
-    // OCR read in, ranked candidates and a decision out
+    // OCR match
     ["POST", /^\/api\/events\/([\w-]+)\/match$/, async (req, [id]) => {
       const event = findEvent(id);
       requireManage(req, event);
@@ -559,7 +538,7 @@ export function createApi(store) {
       return store.mutate((d) => matchRead(d, event, body));
     }],
 
-    // Forget what the matcher learned (the laptop running the server only)
+    // Reset matcher
     ["POST", /^\/api\/matcher\/reset$/, (req) => {
       if (!isLocal(req)) fail(403, "Only the laptop running SELAE can reset the matcher.");
       store.mutate((d) => { const t = d.matcher ? d.matcher.thresholds : undefined; d.matcher = emptyModel(); if (t) d.matcher.thresholds = t; });
@@ -575,7 +554,7 @@ export function createApi(store) {
       return { ok: true };
     }],
 
-    // Let people in off the waitlist, as many as the turnout forecast says is safe (see forecast.js)
+    // Waitlist release
     ["POST", /^\/api\/events\/([\w-]+)\/release$/, async (req, [id]) => {
       const event = findEvent(id);
       requireManage(req, event);
@@ -603,7 +582,7 @@ export function createApi(store) {
       const file = path.join(store.uploadsDir, name);
       if (!UPLOAD_NAME.test(name) || !fs.existsSync(file)) { res.statusCode = 404; res.end(); return true; }
       res.setHeader("Content-Type", UPLOAD_TYPES[name.split(".").pop()]);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); // every upload gets a new name
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       fs.createReadStream(file).pipe(res);
       return true;
     }

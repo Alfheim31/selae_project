@@ -5,9 +5,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { selaeApi } from './server/plugin.js'
 
-// The OCR engine (Tesseract) loads its worker, WebAssembly core and English
-// model at runtime. Copy them from node_modules into public/tesseract so they
-// are served by the app itself and OCR works without internet at the venue.
+// Offline OCR assets
 function tesseractAssets() {
   const copy = () => {
     const out = path.resolve('public/tesseract')
@@ -30,7 +28,7 @@ function tesseractAssets() {
 
 export default defineConfig({
   plugins: [tesseractAssets(), react(), tailwindcss(), selaeApi()],
-  // Listen on the local network too, so phones on the same Wi-Fi can open event pages and register
+  // LAN access
   server: { host: true },
   preview: { host: true },
 })

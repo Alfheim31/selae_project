@@ -1,19 +1,4 @@
-/* ------------------------------------------------------------------
-   Simulated event history, for training and testing the turnout model
-   (server/forecast.js) before SELAE has run real events.
-
-   Every student has a hidden "reliability" (some people show up to
-   everything, some register for everything and come to little). Each
-   registration's true chance of showing up also depends on things
-   SELAE can see: how far ahead they registered, their year level, the
-   time of day and day of week, and whether they got in off the
-   waitlist. The turnout model never sees these rules or the hidden
-   reliability; it only sees who came to past events, and has to learn
-   the pattern from that.
-
-   Used by seed.js (a semester of past events for the demo) and by
-   scripts/eval-turnout.js (a longer history to test against).
-------------------------------------------------------------------- */
+/* Simulated event history */
 
 export function rng(seed) {
   let a = seed >>> 0;
@@ -27,25 +12,21 @@ export function rng(seed) {
 const gauss = (r) => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
 const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 
-/** Year level from a section like "BSCS 3-4" (0 if it can't tell). */
 export function yearOf(section) {
   const m = String(section || "").match(/(\d)\s*-\s*\d/);
   return m ? Number(m[1]) : 0;
 }
 
-/** The hidden part of the world: each student's reliability and how often they register. */
 export function makeWorld(students, r) {
   const people = new Map();
   for (const s of students) {
     const reliability = gauss(r);
-    // People who register for lots of things are a little less reliable on average
     const keenness = Math.exp(0.6 * gauss(r) - 0.25 * reliability);
     people.set(s.id, { reliability, keenness });
   }
   return { people };
 }
 
-/** The true chance this registration turns up. Only the simulator knows this. */
 export function trueShowProb(world, student, event, reg) {
   const p = world.people.get(student.id) || { reliability: 0 };
   const start = new Date(event.startsAt);
@@ -64,7 +45,6 @@ export function trueShowProb(world, student, event, reg) {
   return sigmoid(z);
 }
 
-/** Minutes after the start an attendee arrives: a few early, most in the first half hour, a long late tail. */
 export function arrivalOffset(r) {
   const u = r();
   if (u < 0.15) return -20 * r();
@@ -89,11 +69,6 @@ const TITLES = [
 const HOURS = [8, 10, 10, 13, 13, 15, 15, 17, 18];
 const CAPACITIES = [40, 50, 60, 80, 100, 120];
 
-/**
- * Generate `count` past events, oldest first, ending `endDaysAgo` days before `now`.
- * `ids` and `codes` make the ids and ticket codes (seed.js passes its own so they match the rest of the data).
- * Returns { events, registrations, logs }; registrations include `_p`, the true show-up chance, for evaluation only.
- */
 export function simulateHistory({ students, now, r, world, count = 10, spacingDays = 7, endDaysAgo = 4, newId, newCode, idPrefix = "sim", demand: [dLo, dHi] = [0.7, 1.45] }) {
   const events = [], registrations = [], logs = [];
   const pick = (a) => a[Math.floor(r() * a.length)];
@@ -117,7 +92,7 @@ export function simulateHistory({ students, now, r, world, count = 10, spacingDa
     };
     events.push(event);
 
-    // Who registers: some events are oversubscribed, some aren't
+    // Registrants
     const demand = Math.min(students.length, Math.round(capacity * (dLo + (dHi - dLo) * r())));
     const weighted = students.map((s) => ({ s, w: world.people.get(s.id).keenness * -Math.log(1 - r()) }))
       .sort((a, b) => b.w - a.w).slice(0, demand);
@@ -128,7 +103,7 @@ export function simulateHistory({ students, now, r, world, count = 10, spacingDa
     }).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     regs.forEach((reg, k) => { if (k >= capacity) reg.status = "waitlist"; });
 
-    // A few cancel before the day; the longest-waiting person moves up
+    // Cancellations
     for (const reg of regs) {
       if (reg.status !== "going" || r() > 0.05) continue;
       reg.status = "cancelled";

@@ -2,16 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeed } from "./seed.js";
 
-/* ------------------------------------------------------------------
-   Physical layer: one JSON file on the laptop running the server.
-
-   Node handles one request at a time, so every check-in reads and
-   writes the data without interleaving. Two gates scanning the same
-   ticket at the same moment cannot both admit it.
-
-   Writes go to a temporary file first and are then renamed over the
-   real one, so a crash mid-write never leaves a half-written file.
-------------------------------------------------------------------- */
+/* Physical layer */
 
 export function openStore(file) {
   const dataFile = path.resolve(file);
@@ -32,7 +23,7 @@ export function openStore(file) {
     fs.renameSync(tmp, dataFile);
   }
 
-  // Uploaded event covers and photos live next to the data file
+  // Uploads folder
   const uploadsDir = path.join(path.dirname(dataFile), "uploads");
   fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -40,7 +31,6 @@ export function openStore(file) {
     file: dataFile,
     uploadsDir,
     get data() { return data; },
-    /** Apply a change, bump the revision, persist. Returns whatever fn returns. */
     mutate(fn) {
       const out = fn(data);
       data.rev += 1;

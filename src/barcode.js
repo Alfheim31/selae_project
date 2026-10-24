@@ -2,17 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { prepareZXingModule, readBarcodes } from "zxing-wasm/reader";
 import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
 
-/* ------------------------------------------------------------------
-   Live barcode decoding for the gate scanner.
-
-   Uses zxing-cpp compiled to WebAssembly. It reads the 1D barcodes
-   printed on student IDs (Code 128, Code 39, ITF, Codabar) as well as
-   QR codes, and copes with dark or busy backgrounds behind the card,
-   which the pure-JavaScript ZXing port does not.
-
-   The .wasm file is bundled with the app and served by Vite, so
-   scanning works with no internet connection at the venue.
-------------------------------------------------------------------- */
+/* Live barcode decoding for the gate scanner */
 
 prepareZXingModule({
   overrides: {
@@ -30,8 +20,7 @@ function makeReader() {
     const w = video.videoWidth;
     const h = video.videoHeight;
     if (!w || !h) return null;
-    // Full resolution on purpose: shrinking the frame thins the bars on a 1D
-    // barcode until they stop reading. zxing-cpp handles a 720p frame in ~5 ms.
+    // Frame capture
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     ctx.drawImage(video, 0, 0, w, h);
     const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), READ_OPTIONS);
@@ -39,24 +28,11 @@ function makeReader() {
   };
 }
 
-/** Pulls a student number (YYYY-NNNNN) out of whatever the barcode encodes. */
 export function parseStudentId(raw) {
   const m = String(raw).match(/(\d{4})\s*-?\s*(\d{5})/);
   return m ? `${m[1]}-${m[2]}` : null;
 }
 
-/**
- * Watches a <video> element and calls onDetect(text) for each new barcode.
- *
- * running  - the camera is live; the loop runs while this is true
- * ready    - the scanner can accept a scan right now (no result on screen)
- *
- * A code that was just read is ignored until it has been out of view for
- * `absentMs`, so an ID left in front of the camera doesn't check in twice
- * the moment the result screen clears.
- *
- * Returns "loading" | "ready" | "error" | null (camera not running).
- */
 export function useBarcodeScanner({ videoRef, running, ready, onDetect, absentMs = 1500 }) {
   const [status, setStatus] = useState(null);
   const onDetectRef = useRef(onDetect);
@@ -78,7 +54,7 @@ export function useBarcodeScanner({ videoRef, running, ready, onDetect, absentMs
       const now = performance.now();
       const video = videoRef.current;
       if (!readyRef.current || !video || video.paused) {
-        // A result is on screen: whatever was just scanned counts as still in view
+        // Pause while showing a result
         if (last.current.code) last.current.seen = now;
       } else if (video.readyState >= 2) {
         let code = null;
@@ -87,7 +63,7 @@ export function useBarcodeScanner({ videoRef, running, ready, onDetect, absentMs
           failures = 0;
           if (!stopped) setStatus("ready");
         } catch {
-          // The decoder failed to load or crashed; keep retrying but tell the operator
+          // Decoder error
           failures += 1;
           if (!stopped && failures >= 3) setStatus("error");
         }

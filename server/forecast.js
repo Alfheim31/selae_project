@@ -1,61 +1,8 @@
-/* ------------------------------------------------------------------
-   Intelligent component #2: turnout forecasting and waitlist release.
-
-   The OCR matcher answers "who is this person at the gate?". This
-   module answers the logistics questions before and during an event:
-   "how many of the people registered will actually come?" and "how
-   many people can we let in off the waitlist without turning anyone
-   away at the door?"
-
-   1. Learning from past events.
-      Every registration at a past event is a labelled example: they
-      either checked in or they didn't. A logistic regression learns
-      P(show up | registration) from what SELAE can see at the time of
-      registering:
-        - how far ahead they registered (and whether it was the same day)
-        - their own record at earlier events (smoothed show-up rate,
-          first event or not, whether they missed their last one)
-        - year level, from the section
-        - when the event is (early morning, evening, Friday)
-        - whether they got their seat off the waitlist
-      Features are built only from events *before* each example, so
-      the model is never shown the future. It is fitted by Newton's
-      method (iteratively reweighted least squares) with a small L2
-      penalty, and checked on the most recent past events held out.
-
-   2. Explaining.
-      Each feature's contribution, weight x standardized value, says
-      which facts pushed one person's prediction up or down
-      ("came to 1 of 4 past events", "registered 9 days ahead").
-
-   3. Updating during the event.
-      Not having arrived yet is evidence. From past events SELAE knows
-      F(t), the share of eventual attendees who have arrived t minutes
-      after the start. By Bayes' rule, for someone not here yet:
-         P(comes | not here at t) = p (1 - F(t)) / (p (1 - F(t)) + 1 - p)
-      so the forecast tightens as check-in goes on.
-
-   4. Deciding how many seats to release.
-      Given how this event goes, arrivals are a sum of independent
-      yes/no events with different probabilities: a Poisson-binomial
-      distribution, computed exactly. Whole events also swing together
-      (rain, exams), and the model is never perfect, so SELAE measures
-      how far past events landed from its forecast and averages over
-      that uncertainty (see eventSpread below).
-      Letting k more people in off the waitlist (in waitlist order, to
-      stay fair) raises both the expected headcount and the chance that
-      more people come than the venue holds. SELAE recommends the
-      largest k whose chance of overflow stays under the organizer's
-      limit (5% by default). The organizer decides; nothing is released
-      on its own, and the gate still refuses anyone past capacity.
-
-   Everything here is plain math with no Node imports, so the browser
-   imports the same functions to update the forecast live.
-------------------------------------------------------------------- */
+/* Turnout forecast and waitlist release */
 
 export const DEFAULT_RISK = 0.05;
-const MIN_ROWS = 60;      // fewer labelled registrations than this and the model isn't trained
-const LAMBDA = 1;         // L2 penalty on the standardized weights
+const MIN_ROWS = 60;
+const LAMBDA = 1;
 const FALLBACK_RATE = 0.7;
 
 /* ---------- features ---------- */
@@ -73,13 +20,11 @@ export const FEATURES = [
   { key: "friday", label: "On a Friday" },
   { key: "promoted", label: "Got in off the waitlist" },
 ];
-// Binary features only explain a prediction when they're switched on ("evening event", not "not an evening event")
 const ALWAYS_EXPLAIN = new Set(["lead", "pastRate"]);
 
 const yearOf = (section) => { const m = String(section || "").match(/(\d)\s*-\s*\d/); return m ? Number(m[1]) : 0; };
 const sigmoid = (z) => 1 / (1 + Math.exp(-z));
 
-/** Raw facts about one registration, plus the feature vector built from them. `hist` is this student's earlier events. */
 export function describeRegistration(reg, event, student, hist, { assumePromoted = false } = {}) {
   const start = new Date(event.startsAt);
   const leadDays = Math.max(0, (start - new Date(reg.createdAt)) / 86400000);
@@ -133,7 +78,6 @@ function solve(A, b) {
   return x;
 }
 
-/** Fit P(y=1|x) = sigmoid(b + w·z), z = standardized x. Returns { b, w, mean, sd }. */
 export function fitLogistic(X, y, lambda = LAMBDA) {
   const d = X[0].length, n = X.length;
   const mean = Array(d).fill(0), sd = Array(d).fill(0);
@@ -158,7 +102,7 @@ export function fitLogistic(X, y, lambda = LAMBDA) {
       }
     }
     for (let j = 0; j <= d; j++) for (let k = 0; k < j; k++) H[j][k] = H[k][j];
-    for (let j = 1; j <= d; j++) { g[j] -= lambda * w[j]; H[j][j] += lambda; } // no penalty on the intercept
+    for (let j = 1; j <= d; j++) { g[j] -= lambda * w[j]; H[j][j] += lambda; }
     const step = solve(H, g);
     let big = 0;
     step.forEach((s, j) => { w[j] += s; big = Math.max(big, Math.abs(s)); });
@@ -180,7 +124,7 @@ export function auc(p, y) {
   for (let i = 0; i < idx.length;) {
     let j = i;
     while (j < idx.length && p[idx[j]] === p[idx[i]]) j++;
-    const avg = (i + j + 1) / 2; // average 1-based rank for ties
+    const avg = (i + j + 1) / 2;
     for (let k = i; k < j; k++) if (y[idx[k]]) { sumPos += avg; pos++; }
     rank = j; i = j;
   }
@@ -196,7 +140,6 @@ export const logLoss = (p, y) => -p.reduce((s, v, i) => {
 /* ---------- training data from past events ---------- */
 const startMs = (e) => new Date(e.startsAt).getTime();
 
-/** Labelled examples from every event that has ended, in time order, with features from earlier events only. */
 export function buildExamples(data, now = new Date()) {
   const past = data.events.filter((e) => new Date(e.endsAt) < now).sort((a, b) => startMs(a) - startMs(b));
   const regsBy = new Map();
@@ -204,7 +147,7 @@ export function buildExamples(data, now = new Date()) {
     if (!regsBy.has(r.eventId)) regsBy.set(r.eventId, []);
     regsBy.get(r.eventId).push(r);
   }
-  const hist = new Map(); // studentId -> [{ start, came }]
+  const hist = new Map();
   const rows = [];
   const arrivals = [];
   past.forEach((event, eventIndex) => {
@@ -225,20 +168,15 @@ export function buildExamples(data, now = new Date()) {
   return { past, rows, hist, arrivals };
 }
 
-/** Quantiles of arrival times (minutes after the start), to estimate F(t). */
 function arrivalQuantiles(offsets, n = 60) {
   if (offsets.length < 30) {
-    // Not enough history: assume arrivals spread over the first hour, peaking around 10 minutes in
+    // Default arrival curve
     return Array.from({ length: n + 1 }, (_, i) => -15 + 75 * (i / n) ** 1.6);
   }
   const s = offsets.slice().sort((a, b) => a - b);
   return Array.from({ length: n + 1 }, (_, i) => Math.round(s[Math.min(s.length - 1, Math.floor((i / n) * (s.length - 1)))] * 10) / 10);
 }
 
-/**
- * Train the turnout model on every past event. Also reports how it does on the most recent
- * past events when trained only on the ones before them (the honest test).
- */
 export function trainTurnout(data, now = new Date()) {
   const { past, rows, hist, arrivals } = buildExamples(data, now);
   const y = rows.map((r) => r.y);
@@ -250,7 +188,7 @@ export function trainTurnout(data, now = new Date()) {
   };
   if (rows.length < MIN_ROWS || base === 0 || base === 1) return model;
 
-  // Holdout: the most recent quarter of past events, trained on the rest
+  // Holdout test
   const testFrom = past.length >= 4 ? Math.floor(past.length * 0.75) : past.length;
   const train = rows.filter((r) => r.eventIndex < testFrom), test = rows.filter((r) => r.eventIndex >= testFrom);
   if (test.length >= 20 && train.length >= MIN_ROWS) {
@@ -259,7 +197,7 @@ export function trainTurnout(data, now = new Date()) {
     const yt = test.map((r) => r.y);
     const pm = test.map((r) => predictRaw(f, r.x));
     const pb = test.map(() => trainBase);
-    const pr = test.map((r) => r.x[2]); // the person's own smoothed past rate, on its own
+    const pr = test.map((r) => r.x[2]);
     const byEvent = new Map();
     test.forEach((r, i) => {
       const e = byEvent.get(r.eventId) || { actual: 0, model: 0, base: 0, n: 0 };
@@ -281,8 +219,6 @@ export function trainTurnout(data, now = new Date()) {
 
   model.fit = fitLogistic(rows.map((r) => r.x), y);
   model.ready = true;
-  // How far real events land from the forecast: refit on the events before each of the most
-  // recent ones and measure the miss. This counts the model's own error, not just event swings.
   const groups = [];
   for (let j = Math.max(1, past.length - 8); j < past.length; j++) {
     const before = rows.filter((r) => r.eventIndex < j), at = rows.filter((r) => r.eventIndex === j);
@@ -304,14 +240,12 @@ function calibration(p, y, bins = 5) {
   return out.filter((b) => b.n).map((b) => ({ ...b, predicted: b.predicted / b.n, actual: b.actual / b.n }));
 }
 
-/** P(show up) for every going and waitlisted registration of one event, with the facts behind each. */
 export function predictEvent(model, data, event) {
   const preds = {};
   const start = startMs(event);
   for (const reg of data.registrations) {
     if (reg.eventId !== event.id || (reg.status !== "going" && reg.status !== "waitlist")) continue;
     const h = (model.hist.get(reg.studentId) || []).filter((e) => e.start < start);
-    // A waitlisted person would only come if released, so predict them as someone who got in off the waitlist
     const { facts, x } = describeRegistration(reg, event, data.directory[reg.studentId], h, { assumePromoted: reg.status === "waitlist" });
     if (!model.ready) { preds[reg.id] = { p: model.baseRate, why: [] }; continue; }
     const p = predictRaw(model.fit, x);
@@ -329,9 +263,8 @@ export function predictEvent(model, data, event) {
   return preds;
 }
 
-/* ---------- live update and the release decision (shared with the browser) ---------- */
+/* ---------- live update and release decision ---------- */
 
-/** F(t): share of eventual attendees who have arrived t minutes after the start. */
 export function arrivedShare(quantiles, minutes) {
   if (!quantiles || !quantiles.length || minutes < quantiles[0]) return 0;
   if (minutes >= quantiles[quantiles.length - 1]) return 1;
@@ -341,13 +274,11 @@ export function arrivedShare(quantiles, minutes) {
   return (lo + (minutes - quantiles[lo]) / span) / (quantiles.length - 1);
 }
 
-/** Bayes' rule: chance someone still comes, given they haven't arrived t minutes in. */
 export function stillComing(p, share) {
   const late = p * (1 - share);
   return late + (1 - p) > 0 ? late / (late + (1 - p)) : 0;
 }
 
-/** Exact distribution of how many of these independent people turn up. */
 export function poissonBinomial(probs) {
   let pmf = [1];
   for (const p of probs) pmf = addPerson(pmf, p);
@@ -364,19 +295,12 @@ function quantile(pmf, q) {
   return pmf.length - 1;
 }
 
-/* Event-level swings. Attendees don't decide independently: rain, an exam the next day or a dull
-   topic moves everyone at once. Each event gets a shift d added to every attendee's log-odds,
-   with d ~ N(0, spread^2) learned from past events. The forecast averages over d with 7-point
-   Gauss-Hermite quadrature, and during check-in, who has and hasn't arrived updates the belief
-   about d by Bayes' rule. Ignoring this made a "1% risk" release overflow far more often. */
+/* Event-level swings */
 const GH = [[0, 0.4571428571428571], [1.1544053947399682, 0.2401231786050126], [-1.1544053947399682, 0.2401231786050126],
   [2.366759410734541, 0.03075712396758654], [-2.366759410734541, 0.03075712396758654],
   [3.750439717725742, 0.0005482688559722184], [-3.750439717725742, 0.0005482688559722184]];
 const logit = (p) => { const q = Math.min(1 - 1e-6, Math.max(1e-6, p)); return Math.log(q / (1 - q)); };
 
-/** How far whole events land from the forecast, as a standard deviation on the log-odds scale.
-    For each event, the shift d that would have made the forecast match it; the spread is the root
-    mean square of those shifts, less the part explained by chance in a finite crowd. */
 export function eventSpread(groups) {
   const shifts = [], noise = [];
   for (const rows of groups) {
@@ -396,15 +320,6 @@ export function eventSpread(groups) {
   return Math.sqrt(Math.max(0.01, meanSquare - noise.reduce((a, b) => a + b, 0) / noise.length));
 }
 
-/**
- * The forecast for one event at time `now`.
- *   regs:   the event's registrations (status, checkin, id)
- *   preds:  { [regId]: { p } } from predictEvent
- *   spread: how much whole events swing (eventSpread); 0 treats attendees as independent
- * Returns the expected final headcount with a 90% range, and for every
- * number of waitlist releases k, the chance of overflowing the venue,
- * the expected empty seats and the expected people turned away.
- */
 export function forecastNow({ capacity, startsAt, endsAt, regs, preds, arrival, spread = 0, now = new Date(), risk = DEFAULT_RISK }) {
   const minutes = (new Date(now) - new Date(startsAt)) / 60000;
   const ended = new Date(now) > new Date(endsAt);
@@ -415,7 +330,7 @@ export function forecastNow({ capacity, startsAt, endsAt, regs, preds, arrival, 
   const pending = regs.filter((r) => r.status === "going" && !r.checkin);
   const waitlist = regs.filter((r) => r.status === "waitlist").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-  // Belief about this event's shift, updated by who has arrived so far
+  // Event shift weights
   const nodes = (spread > 0 ? GH : [[0, 1]]).map(([x, w]) => {
     const d = spread * x;
     let lw = Math.log(w);

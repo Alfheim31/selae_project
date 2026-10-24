@@ -1,18 +1,6 @@
 import { createWorker, PSM } from "tesseract.js";
 
-/* ------------------------------------------------------------------
-   OCR fallback: reads the printed student number off an ID when its
-   barcode won't scan (glare, scratches, a worn card).
-
-   Runs Tesseract in a Web Worker, entirely on the laptop. The worker,
-   the WebAssembly engine and the English model are copied into the
-   build from node_modules (see vite.config.js), so it works with no
-   internet connection at the venue.
-
-   Returns the digits it read plus Tesseract's confidence for each one.
-   Those per-digit confidences are evidence for the matcher on the
-   server (server/matcher.js), which decides who the attendee is.
-------------------------------------------------------------------- */
+/* OCR fallback */
 
 let workerPromise = null;
 
@@ -35,14 +23,13 @@ function getWorker() {
   return workerPromise;
 }
 
-/** Start loading the OCR engine in the background, so the first read isn't slow. */
 export function warmUpOcr() {
   getWorker().catch(() => {});
 }
 
-// Same region as the on-screen frame (.frame in shared.jsx): left/right 18%, top/bottom 16%
+// Crop region
 const ROI = { left: 0.18, top: 0.16, width: 0.64, height: 0.68 };
-const TARGET_WIDTH = 1400; // Tesseract likes larger text; upscale small crops
+const TARGET_WIDTH = 1400;
 
 function capture(video) {
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -59,14 +46,7 @@ function capture(video) {
   return c;
 }
 
-/* Preprocessing. Up to three versions of the frame are read and the best result kept:
-   - "stretched": grayscale with the contrast stretched between the 2nd and
-     98th percentile, so a dim card uses the full range
-   - "flattened": glare correction. A pixel counts as ink when it is a few
-     percent darker than the average of the card around it. Glare lifts the
-     ink and the card around it together, so faded digits in a hotspot
-     still come out black (a local, adaptive threshold)
-   - "binary": the stretched image thresholded with Otsu's method */
+/* Preprocessing */
 function otsu(values) {
   const hist = new Uint32Array(256);
   for (let i = 0; i < values.length; i++) hist[values[i]]++;
@@ -84,7 +64,6 @@ function otsu(values) {
   return thr;
 }
 
-/** Mean of each pixel's (2r+1) x (2r+1) neighbourhood, via an integral image. */
 function boxBlur(gray, w, h, r) {
   const I = new Float64Array((w + 1) * (h + 1));
   for (let y = 0; y < h; y++) {
@@ -121,10 +100,10 @@ function preprocess(canvas) {
   for (let i = 0; i < n; i++) stretched[i] = ((gray[i] - lo) * 255) / (hi - lo);
   const thr = otsu(stretched);
 
-  // Glare correction: compare each pixel with the average brightness around it
+  // Glare correction
   const w = canvas.width, h = canvas.height;
   const bg = boxBlur(gray, w, h, Math.round(w / 25));
-  const INK = 0.96; // at least 4% darker than its surroundings
+  const INK = 0.96;
 
   const make = (fn) => {
     const c = document.createElement("canvas");
@@ -141,9 +120,7 @@ function preprocess(canvas) {
   ];
 }
 
-/* From everything Tesseract found, pick what is most likely the student
-   number: a run of about nine digits, ideally shaped like YYYY-NNNNN,
-   possibly split into two words at the hyphen. */
+/* Pick best reading */
 function pickNumber(blocks) {
   const lines = [];
   for (const b of blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) lines.push(l.words || []);
@@ -152,7 +129,7 @@ function pickNumber(blocks) {
   const consider = (words) => {
     const syms = words.flatMap((w) => w.symbols || []);
     const digits = syms.filter((s) => /^\d$/.test(s.text));
-    // A partial read (some digits lost to glare) is still useful: the matcher handles missing digits
+    // Partial read
     if (digits.length < 6 || digits.length > 11) return;
     const text = syms.map((s) => s.text).join("");
     const conf = digits.map((s) => Math.max(0, Math.min(1, s.confidence / 100)));
@@ -171,10 +148,6 @@ function pickNumber(blocks) {
   return best;
 }
 
-/**
- * Reads the student number from the current camera frame.
- * Resolves to { read: "202341587", conf: [0.97, ...], meanConf, text, variant, ms } or null.
- */
 export async function readStudentNumber(video) {
   const t0 = performance.now();
   const frame = capture(video);
@@ -185,7 +158,7 @@ export async function readStudentNumber(video) {
     const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
     const found = pickNumber(data.blocks);
     if (found && (!best || found.score > best.score)) best = { ...found, variant };
-    // A clean, confident read on the first pass is good enough
+    // Early exit
     if (best && best.read.length === 9 && best.mean > 0.9) break;
   }
   if (!best) return null;

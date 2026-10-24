@@ -11,11 +11,7 @@ import {
   skyOf, flightNo,
 } from "./shared.jsx";
 
-/* ------------------------------------------------------------------
-   Public pages, opened on attendees' phones over the local Wi-Fi:
-   your events, discover, the event slide-over, the event page and
-   registration, the boarding-pass ticket, and creating an event.
-------------------------------------------------------------------- */
+/* Public pages */
 
 export const CATEGORIES = [
   ["Workshop", Hammer], ["Talk", Mic], ["Hackathon", CodeXml], ["Study jam", BookOpen], ["Career", Briefcase],
@@ -177,7 +173,6 @@ function TicketPill({ ticket }) {
   return <span className="pill cancelled">Cancelled</span>;
 }
 
-/** An event as a horizontal boarding pass: date, details, and a tear-off stub. */
 export function EventPass({ e, ticket, onOpen, active }) {
   const d = new Date(e.startsAt);
   const Icon = categoryIcon(e.category);
@@ -313,7 +308,7 @@ function EmptyItinerary({ past }) {
 /* ---------------- discover ---------------- */
 function boardStatus(e, now = Date.now()) {
   const start = new Date(e.startsAt).getTime();
-  // Light colors: the board is dark, like an airport display
+  // Board status colors
   if (now >= start && now <= new Date(e.endsAt).getTime()) return ["In progress", "#7EE2A8"];
   if (start - now < 3600000) return ["Boarding", "#D8F06A"];
   if (!e.registrationOpen) return ["Closed", "#8E9AD0"];
@@ -613,7 +608,7 @@ export function Lightbox({ photos, index, onIndex, onClose }) {
   );
 }
 
-/* ---------------- event page (what people registering see) ---------------- */
+/* ---------------- event page ---------------- */
 export function EventPage({ id }) {
   const [event, error] = usePolled(() => api.event(id), [id], 8000);
   const saved = myTickets.forEvent(id);
@@ -862,7 +857,6 @@ export function TicketPage({ code }) {
 const pad = (n) => String(n).padStart(2, "0");
 const toLocalInput = (d) => { d = new Date(d); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
-/** Pick a cover photo. With `eventId` it uploads right away; without, it hands the prepared image to `onPick`. */
 export function CoverPicker({ event, eventId, onChange, preview, onPick }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -912,7 +906,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
   const [f, setF] = useState(() => (initial
     ? { ...defaults, ...initial, startsAt: toLocalInput(initial.startsAt), endsAt: toLocalInput(initial.endsAt) }
     : defaults));
-  const [cover, setCover] = useState(null); // prepared image waiting for the event to exist (create only)
+  const [cover, setCover] = useState(null);
   const coverUrl = useMemo(() => (cover ? URL.createObjectURL(cover) : null), [cover]);
   useEffect(() => () => coverUrl && URL.revokeObjectURL(coverUrl), [coverUrl]);
   const [busy, setBusy] = useState(false);
@@ -1010,7 +1004,7 @@ export function CreateEvent() {
       <div className="panel p-5 md:p-6">
         <EventForm submitLabel="Create event" onSubmit={async (fields, cover) => {
           const e = await api.create(fields);
-          if (cover) { try { await api.uploadCover(e.id, cover); } catch { /* the event exists; the cover can be added in settings */ } }
+          if (cover) { try { await api.uploadCover(e.id, cover); } catch {/* ignore */} }
           go(`m/${e.id}`);
         }} />
       </div>

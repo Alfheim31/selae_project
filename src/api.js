@@ -1,10 +1,4 @@
-/* Talks to the SELAE server (server/api.js).
-
-   This browser remembers a few things in localStorage:
-   - host keys for events created here (they unlock managing the event)
-   - ticket codes registered from here (shown under Events)
-   - calendars it follows, and when it last read its notifications
-   Clearing site data forgets them; the server still has the records. */
+/* Talks to the SELAE server */
 
 const KEYS = "selae.hostKeys";
 const TICKETS = "selae.tickets";
@@ -33,7 +27,6 @@ export const myTickets = {
   remove(code) { save(TICKETS, myTickets.all().filter((t) => t.code !== code)); },
 };
 
-/** Calendars (hosts) this device follows, by name: their new events show up in notifications. */
 export const follows = {
   all: () => load(FOLLOWS, []),
   has: (name) => follows.all().some((n) => n.toLowerCase() === String(name).toLowerCase()),
@@ -44,13 +37,11 @@ export const follows = {
   },
 };
 
-/** When this device last opened the notification list. */
 export const seen = {
   get: () => load(SEEN, null),
   mark(time) { save(SEEN, time); },
 };
 
-/** Send an image as raw bytes (it has already been resized in the browser). */
 async function upload(path, blob) {
   const keys = Object.values(hostKeys.all());
   const headers = { "Content-Type": blob.type || "image/jpeg" };

@@ -1,28 +1,5 @@
 #!/usr/bin/env node
-/* ------------------------------------------------------------------
-   Evaluates the OCR matcher (server/matcher.js) against a baseline.
-
-   Synthetic mode (default): npm run eval
-     Builds a student directory and an event guest list, simulates
-     attendees arriving and OCR misreading their numbers under glare,
-     and compares three matchers on the same reads:
-       - Baseline: nearest student number by plain edit distance
-         (what the earlier prototype did), auto-accepting a unique
-         match within one edit
-       - Bayesian, before learning: the matcher with its starting beliefs
-       - Bayesian, after learning: the same matcher after operators
-         corrected a separate batch of reads at this "venue"
-
-   Real-data mode: npm run eval -- --csv reads.csv --roster roster.txt
-     reads.csv:   read,truth[,conf]   one OCR read per line, the true
-                  student number, and optionally the per-digit OCR
-                  confidences separated by spaces (0..1)
-     roster.txt:  the student numbers registered for the event, one per line
-     The first half of the reads is used for learning, the second half
-     for testing, so "after learning" is measured on unseen reads.
-
-   Options: --n 600 (test reads)  --train 400 (reads operators see while it learns)  --seed 7  --json out.json
-------------------------------------------------------------------- */
+/* Evaluates the OCR matcher */
 import fs from "node:fs";
 import { rank, learn, emptyModel, PRIOR_WEIGHT, digitsOf, CONFUSABLE } from "../server/matcher.js";
 
@@ -62,10 +39,7 @@ function baseline(guests, read) {
   return { decision, ranked: scored.slice(0, 3).map((x) => x.id) };
 }
 
-/* ---------- the venue's real OCR behaviour (unknown to the matcher) ---------- */
-// Under this venue's lights and this batch of cards, a few confusions dominate,
-// and most are NOT the ones the matcher starts out expecting (see CONFUSABLE in
-// matcher.js). That is the situation learning from corrections is for.
+/* ---------- simulated venue OCR ---------- */
 const VENUE = { errorRate: 0.11, deletion: 0.015, insertion: 0.01,
   favourites: { 4: [7], 0: [2], 8: [0], 6: [0], 7: [4], 1: [4, 7], 3: [9], 9: [3], 5: [3], 2: [0] } };
 function ocr(trueId) {
@@ -78,7 +52,7 @@ function ocr(trueId) {
       const fav = VENUE.favourites[ch];
       const wrong = fav && R() < 0.8 ? pick(fav) : (+ch + 1 + Math.floor(R() * 9)) % 10;
       read.push(String(wrong));
-      conf.push(between(0.3, 0.85)); // OCR is often still fairly sure when wrong
+      conf.push(between(0.3, 0.85));
     } else {
       read.push(ch);
       conf.push(between(0.7, 0.99));
@@ -117,7 +91,6 @@ function runBaseline(guests, cases) {
   return cases.map((c) => ({ ...c, ...baseline(guests, c.read) }));
 }
 
-/** Operators resolve reads the matcher wasn't sure about; those answers are what it learns from. */
 function trainOn(people, cases, model) {
   for (const c of cases) {
     const out = rank(people, c.read, c.conf, model);
@@ -152,7 +125,7 @@ function synthetic() {
     : waitlist.includes(id) ? PRIOR_WEIGHT.waitlist : PRIOR_WEIGHT.stranger);
   const people = directory.map((id) => ({ id, weight: weight(id) }));
 
-  // Who walks up to the gate: mostly expected guests, some repeats, some who never registered or aren't on file
+  // Arrivals
   const arrival = () => {
     const x = R();
     if (x < 0.86) return { truth: pick(expected), onFile: true };
@@ -177,7 +150,6 @@ function synthetic() {
   };
 }
 
-/* How the auto-identify threshold trades operator workload against mistakes */
 function sweep(people, test, model) {
   return [0.8, 0.9, 0.95, 0.99].map((autoAt) => {
     const m = { ...model, thresholds: { ...model.thresholds, autoAt } };
