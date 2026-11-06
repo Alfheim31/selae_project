@@ -4,6 +4,8 @@ import crypto from "node:crypto";
 import { rng, makeWorld, simulateHistory, trueShowProb } from "../server/simulate.js";
 import { trainTurnout, predictEvent, forecastNow, auc, brier, logLoss } from "../server/forecast.js";
 
+
+
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1] && !all[i + 1].startsWith("--") ? all[i + 1] : true]);
   return acc;

@@ -232,27 +232,10 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 /* gate scanner */
 .viewfinder{position:relative;border-radius:14px;overflow:hidden;aspect-ratio:4/3;border:1px solid #1E2A55;
   background:radial-gradient(ellipse at 50% 38%,#26336a 0%,#141c40 55%,#0b1130 100%);color:#EEF1FA}
-.frame{position:absolute;left:18%;right:18%;top:16%;bottom:16%}
-.corner{position:absolute;width:42px;height:42px;border:0 solid var(--lime)}
-.corner.tl{top:0;left:0;border-top-width:4px;border-left-width:4px;border-top-left-radius:12px}
-.corner.tr{top:0;right:0;border-top-width:4px;border-right-width:4px;border-top-right-radius:12px}
-.corner.bl{bottom:0;left:0;border-bottom-width:4px;border-left-width:4px;border-bottom-left-radius:12px}
-.corner.br{bottom:0;right:0;border-bottom-width:4px;border-right-width:4px;border-bottom-right-radius:12px}
 .vf-status{position:absolute;left:14px;top:14px;display:flex;align-items:center;gap:.45rem;font-family:var(--f-mono);font-size:.7rem;letter-spacing:.06em;
   background:rgba(11,17,48,.75);padding:.3rem .65rem;border-radius:6px}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.idcard{position:absolute;left:50%;top:50%;width:min(58%,320px);aspect-ratio:1.586;background:#F3F5FA;border-radius:12px;
-  box-shadow:0 22px 44px rgba(0,0,0,.5);overflow:hidden;color:#1B2440;transform:translate(-50%,-50%) rotate(-3deg);transition:transform .35s ease,opacity .3s ease}
-.idcard.away{opacity:0;transform:translate(-50%,-34%) rotate(-3deg) scale(.92)}
-.idcard .band{height:21%;background:#7B1E2A;color:#fff;font-weight:700;font-size:.62rem;display:flex;align-items:center;padding:0 7%}
-.idcard .photo{position:absolute;left:7%;top:30%;width:23%;height:43%;background:#C5CEE2;border-radius:4px}
-.idcard .info{position:absolute;left:36%;top:30%;right:7%}
-.idcard .ln{height:7px;background:#D3DAE8;border-radius:3px;margin-bottom:6px}
-.idcard .num{display:inline-block;font-weight:700;font-size:.9rem;padding:1px 5px;margin:2px 0 0 -5px;border-radius:4px}
-.idcard .num.reading{outline:2px solid #8DAA16;outline-offset:1px;background:rgba(216,240,106,.45)}
-.idcard .bars{position:absolute;left:7%;right:7%;bottom:8%;height:13%;
-  background:repeating-linear-gradient(90deg,#1B2440 0 2px,transparent 2px 4px,#1B2440 4px 5px,transparent 5px 8px,#1B2440 8px 11px,transparent 11px 13px)}
-.glare{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 72% 74%,rgba(255,255,255,.97) 0%,rgba(255,255,255,.82) 16%,rgba(255,255,255,0) 42%)}
+.dot-live{animation:blink 1.2s infinite}
 .viewfinder video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:#0b1130}
 .viewfinder video.frozen{filter:grayscale(.15) brightness(.8)}
 .viewfinder .btn{border-color:rgba(255,255,255,.3)}
@@ -265,8 +248,6 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .camselect{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;color:var(--text);padding:.32rem .55rem;font:inherit;font-size:.88rem;max-width:220px}
 .spin{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.sweep{position:absolute;left:0;right:0;height:3px;background:var(--lime);box-shadow:0 0 14px var(--lime);animation:sweep 1s ease-in-out infinite alternate}
-@keyframes sweep{from{top:4%}to{top:96%}}
 .ocr-tag{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);background:var(--lime);color:var(--lime-ink);
   font-weight:700;font-size:.85rem;padding:.3rem .7rem;border-radius:6px;white-space:nowrap}
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}
@@ -301,8 +282,6 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .suggest button:hover,.suggest button[data-active="true"]{background:var(--raised)}
 .hold{position:relative;overflow:hidden}
 .hold .fill{position:absolute;left:0;top:0;bottom:0;background:var(--lime)}
-.demo summary{cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);list-style:none}
-.demo summary::-webkit-details-marker{display:none}
 /* dialogs and feedback */
 .modal-bg{position:fixed;inset:0;background:rgba(20,27,58,.42);backdrop-filter:blur(3px);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;animation:fade .18s ease}
 .modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;padding:1.25rem;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 30px 60px -20px rgba(20,27,58,.45)}
@@ -387,24 +366,6 @@ export function lev(a, b) {
     for (let j = 1; j <= b.length; j++)
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
   return d[a.length][b.length];
-}
-
-const CONFUSE = { 0: "8", 1: "7", 2: "7", 3: "8", 4: "9", 5: "6", 6: "5", 7: "1", 8: "3", 9: "4" };
-const rand = (a, b) => a + Math.random() * (b - a);
-export function simulateRead(id, kind, twin) {
-  const digits = id.replace(/\D/g, "").split("");
-  const conf = digits.map(() => rand(0.88, 0.99));
-  if (kind === "hard" && twin) {
-    const other = twin.replace(/\D/g, "");
-    const diffs = digits.map((d, i) => (d !== other[i] ? i : -1)).filter((i) => i >= 0);
-    diffs.forEach((i, k) => { if (k % 2 === 1) digits[i] = other[i]; conf[i] = rand(0.25, 0.4); });
-  } else {
-    // Single glare digit
-    const i = 4 + Math.floor(Math.random() * 5);
-    digits[i] = CONFUSE[digits[i]];
-    conf[i] = rand(0.45, 0.7);
-  }
-  return { read: digits.join(""), conf };
 }
 
 export const METHOD_LABEL = { qr: "QR ticket", barcode: "ID barcode", ocr: "OCR", confirmed: "Operator confirmed", manual: "Manual entry" };

@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "vite build && node server/index.js",
-    "test": "node --test server/matcher.test.js server/forecast.test.js",
+    "test": "node --test server/matcher.test.js server/forecast.test.js server/api.test.js server/store.test.js",
     "eval": "node scripts/eval-matcher.js",
     "eval:turnout": "node scripts/eval-turnout.js"
   },

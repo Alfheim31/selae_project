@@ -3,14 +3,13 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import {
   LayoutDashboard, ScanLine, BarChart3, Search, CheckCircle2, XCircle, AlertTriangle, Camera, CameraOff,
   Volume2, VolumeX, Lock, Download, History, HelpCircle, Ban, Keyboard, Printer, QrCode as QrIcon, Settings,
-  ArrowLeft, ExternalLink, Copy, Clock, CalendarX, WifiOff, ScanText, Brain, Images, ImagePlus, Trash2, X,
+  ArrowLeft, ExternalLink, Copy, Clock, CalendarX, WifiOff, Brain, Images, ImagePlus, Trash2, X,
 } from "lucide-react";
-import { useBarcodeScanner, parseStudentId } from "./barcode.js";
 import { useBeep, HoldToExit, useCamera, CameraStage } from "./camera.jsx";
-import { readStudentNumber, warmUpOcr } from "./ocr.js";
+import { readStudentNumber, digitsApart } from "./ocr.js";
 import { api, hostKeys } from "./api.js";
 import {
-  CSS, Mark, QrCode, Barcode, Trails, skyOf, flightNo, go, useHashRoute, useToast, fmtTime, fmtDate, fmtDateShort, formatName, norm, pct, lev, simulateRead,
+  CSS, Mark, QrCode, Barcode, Trails, skyOf, flightNo, go, useHashRoute, useToast, fmtTime, fmtDate, fmtDateShort, formatName, norm, pct,
   METHOD_LABEL, METHOD_SHORT, OUTCOME_LABEL,
 } from "./shared.jsx";
 import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "./forecast.jsx";
@@ -21,7 +20,6 @@ import { prepareImage } from "./images.js";
 
 const TABS = ["dashboard", "analytics", "photos", "tickets", "settings"];
 const LEGACY = { dashboard: "dashboard", scanner: "scan", analytics: "analytics", testids: "tickets" };
-const TICKET_RE = /^SELAE1:[a-z0-9-]+:[A-Z2-9]{10}$/;
 
 export default function App() {
   const route = useHashRoute();
@@ -485,7 +483,9 @@ function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
   }, [students, waitlist, student, checkins, filter, q]);
 
   const promote = async (reg) => {
-    try { await api.promote(event.id, reg.id); await refresh(); onToast(`${formatName(student(reg.studentId))} moved to going`); }
+    const full = data.going.length >= data.capacity;
+    if (full && !window.confirm(`This event is full (${data.going.length} of ${data.capacity} going). Move ${formatName(student(reg.studentId))} to going anyway?`)) return;
+    try { await api.promote(event.id, reg.id, full); await refresh(); onToast(`${formatName(student(reg.studentId))} moved to going`); }
     catch (e) { onToast(e.message); }
   };
 
@@ -624,45 +624,9 @@ function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
 }
 
 /* ---------------- gate scanner ---------------- */
-const SCENARIOS = [
-  ["clean", "Clean QR ticket read"],
-  ["ocr", "Glare, OCR succeeds"],
-  ["lowconf", "Glare, low-confidence OCR"],
-  ["unreadable", "Unreadable ID"],
-  ["notreg", "Not registered"],
-  ["dup", "Already checked in"],
-  ["full", "Venue at capacity (simulated)"],
-];
-
 function makeActions(data) {
-  const rnd = (a) => a[Math.floor(Math.random() * a.length)];
-  const withStudent = (r) => ({ reg: r, student: data.student(r.studentId) });
   return {
     isRegistered: (sid) => data.registered.has(sid),
-    pickFor(kind) {
-      if (kind === "notreg") {
-        const pool = [...data.byId.values()].filter((s) => !data.regByStudent.has(s.id));
-        return pool.length ? { student: rnd(pool) } : null;
-      }
-      if (kind === "dup") {
-        const pool = data.going.filter((r) => r.checkin);
-        return pool.length ? withStudent(rnd(pool)) : null;
-      }
-      const pool = data.going.filter((r) => !r.checkin);
-      return pool.length ? withStudent(rnd(pool)) : null;
-    },
-    // Closest pair (hard-read demo)
-    closestPair() {
-      const pool = data.going.filter((r) => !r.checkin).map((r) => r.studentId);
-      let best = null;
-      for (let i = 0; i < pool.length; i++)
-        for (let j = 0; j < pool.length; j++) {
-          if (i === j) continue;
-          const d = lev(pool[i], pool[j]);
-          if (!best || d < best.d || (d === best.d && Math.random() < 0.3)) best = { d, id: pool[i], twin: pool[j] };
-        }
-      return best;
-    },
     search(q) {
       const n = norm(q);
       if (n.length < 2) return [];
@@ -679,8 +643,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const actions = useMemo(() => makeActions(data), [data]);
   const [phase, setPhase] = useState("idle");
   const [result, setResult] = useState(null);
-  const [card, setCard] = useState(null);
-  const [glare, setGlare] = useState(false);
   const [cameraOn, setCameraOn] = useState(true);
   const [deviceId, setDeviceId] = useState(null);
   const cam = useCamera(cameraOn, deviceId);
@@ -694,6 +656,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const timers = useRef([]);
   const scanToken = useRef(0);
   const pendingScan = useRef(null);
+  const lastCard = useRef(null);
   const beep = useBeep(sound);
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
@@ -704,7 +667,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const reset = () => {
     clearTimers();
     scanToken.current++;
-    setPhase("idle"); setResult(null); setCard(null); setGlare(false); setPath([]);
+    setPhase("idle"); setResult(null); setPath([]);
     cam.resume();
   };
 
@@ -713,10 +676,11 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   // Check-in decision
   const decide = async (target, method, confidence, opts = {}) => {
     const token = ++scanToken.current;
+    if (target.studentId) lastCard.current = { read: target.studentId.replace(/\D/g, ""), seen: Date.now() };
     setPhase("checking");
     let res;
     try {
-      res = await api.checkin(eventId, { ...target, method, confidence, forceFull: Boolean(opts.forceFull), scanId: opts.scanId || undefined });
+      res = await api.checkin(eventId, { ...target, method, confidence, scanId: opts.scanId || undefined });
     } catch (e) {
       if (token !== scanToken.current) return;
       show({ type: "error", message: e.message });
@@ -727,7 +691,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     refresh();
     const student = res.student;
     if (res.outcome === "approved") {
-      show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(opts.scanId && (method === "confirmed" || method === "manual")) });
+      show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(res.learned) });
       beep("ok");
       later(reset, 3500);
     } else if (res.outcome === "unresolved") {
@@ -740,26 +704,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       if (res.outcome === "dup") later(reset, 5000);
     }
   };
-
-  const handleDecoded = (raw) => {
-    clearTimers();
-    pendingScan.current = null;
-    setCard(null); setGlare(false); setResult(null);
-    setPath(["barcode"]);
-    const text = raw.trim();
-    if (TICKET_RE.test(text)) { decide({ ticket: text }, "qr", 1); return; }
-    const id = parseStudentId(text);
-    if (id) { decide({ studentId: id }, "barcode", 1); return; }
-    api.logUnresolved(eventId, "barcode").then(refresh).catch(() => {});
-    show({ type: "unknown", read: text.length > 40 ? text.slice(0, 40) + "…" : text });
-    beep("error");
-  };
-  const scannerStatus = useBarcodeScanner({
-    videoRef: cam.videoRef,
-    running: live,
-    ready: phase === "idle" && !result,
-    onDetect: handleDecoded,
-  });
 
   // OCR match
   const matchRead = async (read, conf, source) => {
@@ -791,97 +735,89 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     }
   };
 
-  // Read printed number
-  const [ocrState, setOcrState] = useState("idle");
-  useEffect(() => { if (live) warmUpOcr(); }, [live]);
-  const readPrinted = async () => {
-    if (!live || phase !== "idle" || result) return;
-    clearTimers();
-    pendingScan.current = null;
-    const token = ++scanToken.current;
-    setCard(null); setGlare(false); setResult(null);
-    setPhase("ocr"); setPath(["ocr"]);
-    cam.freeze();
-    let ocr;
-    try {
-      setOcrState("loading");
-      ocr = await readStudentNumber(cam.videoRef.current);
-      setOcrState("idle");
-    } catch (e) {
-      setOcrState("error");
-      if (token !== scanToken.current) return;
-      show({ type: "error", message: "The OCR engine couldn't start. Use manual entry, and check that the app was built with npm start." });
-      beep("error");
-      return;
-    }
-    if (token !== scanToken.current) return;
-    if (!ocr) {
-      api.logUnresolved(eventId, "ocr").then(refresh).catch(() => {});
-      setResult({ type: "unresolved", noDigits: true });
-      setPhase("result");
-      beep("error");
-      return;
-    }
-    matchRead(ocr.read, ocr.conf, "camera");
-  };
-
-  const run = (kind) => {
-    if (!cameraUsable) return;
-    reset();
-    const pick = actions.pickFor(kind);
-    if (!pick) {
-      setResult({ type: "error", message: kind === "dup" ? "Nobody has checked in yet, so there's no one to scan twice."
-        : kind === "notreg" ? "Every student on file is registered for this event."
-        : "Everyone on the guest list has already checked in." });
-      setPhase("result");
-      return;
-    }
-    let { student, reg } = pick;
-    let twin = null;
-    if (kind === "lowconf") {
-      const pair = actions.closestPair();
-      if (pair) { student = data.student(pair.id); twin = pair.twin; }
-    }
-    const needsOcr = ["ocr", "lowconf", "unreadable"].includes(kind);
-    setCard(student);
-    setGlare(needsOcr);
-    setPhase("barcode");
-    setPath(["barcode"]);
-    if (!needsOcr) {
-      later(() => (reg && (kind === "clean" || kind === "dup")
-        ? decide({ ticket: `SELAE1:${eventId}:${reg.code}` }, "qr", 1)
-        : decide({ studentId: student.id }, "barcode", 1, { forceFull: kind === "full" })), 900);
-      return;
-    }
-    later(() => { setPhase("ocr"); setPath(["barcode", "ocr"]); }, 1100);
-    later(() => {
-      if (kind === "ocr" || kind === "lowconf") {
-        // Demo OCR read
-        const { read, conf } = simulateRead(student.id, kind === "ocr" ? "glare" : "hard", twin);
-        matchRead(read, conf, "demo");
-      } else {
-        setPath(["barcode", "ocr", "match"]);
-        api.logUnresolved(eventId, "ocr").then(refresh).catch(() => {});
-        setResult({ type: "unresolved" });
-        setPhase("result");
-        beep("error");
-        focusManual();
+  // Continuous student number scan
+  const matchReadRef = useRef(matchRead);
+  matchReadRef.current = matchRead;
+  const idleRef = useRef(false);
+  idleRef.current = phase === "idle" && !result;
+  const [scan, setScan] = useState({ kind: "loading", reads: 0 });
+  useEffect(() => {
+    if (!live) return undefined;
+    let stopped = false;
+    let timer = 0;
+    let attempt = 0;
+    let retries = 0;
+    let reads = 0;
+    let lastFound = Date.now();
+    let recent = [];
+    setScan({ kind: "loading", reads: 0 });
+    const tick = async () => {
+      if (stopped) return;
+      const video = cam.videoRef.current;
+      let wait = 50;
+      if (!idleRef.current) {
+        // Card may still be in view while a result shows
+        recent = [];
+        lastFound = Date.now();
+        if (lastCard.current) lastCard.current.seen = Date.now();
+      } else if (video && video.readyState >= 2 && !video.paused) {
+        const token = scanToken.current;
+        let ocr = null;
+        try {
+          ocr = await readStudentNumber(video, attempt);
+          reads++;
+        } catch (e) {
+          console.error("Student number reader:", e);
+          if (!stopped) setScan({ kind: "error", reads });
+          timer = setTimeout(tick, 5000);
+          return;
+        }
+        if (stopped) return;
+        const now = Date.now();
+        const read = ocr ? ocr.read : null;
+        // Stay on settings that just worked for a few reads, otherwise try the next ones
+        if (read) { retries = 4; lastFound = now; }
+        else if (retries > 0) retries--;
+        else attempt++;
+        recent = recent.filter((r) => now - r.at < 30000);
+        const handled = lastCard.current;
+        const sameCardInView = read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000);
+        if (sameCardInView) setScan({ kind: "same", reads });
+        else if (read) setScan({ kind: "found", reads, number: `${read.slice(0, 4)}-${read.slice(4)}` });
+        else if (now - lastFound > 2000) setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
+        else setScan((s) => ({ ...s, reads }));
+        if (read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000)) {
+          // Same card still in view, or a noisy read of it. Only exact reads extend the wait, so the next person with a similar number gets through
+          if (handled.read === read) handled.seen = now;
+        } else if (read && recent.some((r) => r.read === read) && idleRef.current && token === scanToken.current) {
+          // Same number twice
+          recent = [];
+          lastCard.current = { read, seen: now };
+          pendingScan.current = null;
+          setPath(["ocr"]);
+          setPhase("ocr");
+          cam.freeze();
+          matchReadRef.current(ocr.read, ocr.conf, "camera");
+        } else if (read) {
+          recent.push({ read, at: now });
+        }
       }
-    }, 2400);
-  };
+      timer = setTimeout(tick, wait);
+    };
+    tick();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions = actions.search(q);
   const chooseManual = (s) => {
     reset();
     setQ("");
-    setCard(null);
     setPath(["manual"]);
     const scanId = pendingScan.current;
     pendingScan.current = null;
     decide({ studentId: s.id }, "manual", null, { scanId });
   };
 
-  const busy = phase === "barcode" || phase === "ocr" || phase === "checking";
   const count = checkins.size;
 
   const stepState = (id) => {
@@ -934,45 +870,30 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
             {live ? (
               <>
                 <div className="vf-status">
-                  <span className="dot" style={{ background: scannerStatus === "error" ? "var(--warn)" : "var(--ok)" }} />
-                  {scannerStatus === "ready" ? "Scanning for QR tickets and ID barcodes" : scannerStatus === "error" ? "Code reader failed to load, use manual entry" : "Camera live, loading code reader"}
-                </div>
-                <div className="frame" aria-hidden="true">
-                  <span className="corner tl" /><span className="corner tr" /><span className="corner bl" /><span className="corner br" />
-                  {phase === "barcode" && <div className="sweep" />}
+                  <span className={`dot ${scan.kind === "error" ? "" : "dot-live"}`} style={{ background: scan.kind === "error" ? "var(--warn)" : "var(--ok)" }} />
+                  {phase !== "idle" ? "Paused while showing the result"
+                    : scan.kind === "loading" ? "Starting the student number reader"
+                    : scan.kind === "error" ? "Reader error, retrying. Use manual entry for now"
+                    : `Scanning, ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
                 </div>
                 {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
-                {phase === "idle" && <div className="vf-note">Hold the QR ticket or ID barcode inside the frame. If it doesn't read, press Read printed number.</div>}
-                {phase === "idle" && !result && (
-                  <button className="btn btn-sm btn-primary vf-ocr" onClick={readPrinted} title="Read the printed student number with OCR">
-                    <ScanText size={16} /> Read printed number
-                  </button>
+                {phase === "idle" && (
+                  <div className="vf-note">
+                    {scan.kind === "found" ? `Found ${scan.number}. Hold still, confirming`
+                      : scan.kind === "same" ? "This ID was just scanned. Take it away to scan another"
+                      : scan.kind === "struggling" ? "No student number yet. Move the ID closer, hold it still and avoid glare"
+                      : scan.kind === "error" ? "The reader isn't working right now"
+                      : "Show the student ID to the camera"}
+                  </div>
                 )}
                 {phase === "result" && <div className="vf-note">Frame held</div>}
               </>
             ) : cameraOn && cam.state !== "starting" ? (
               <>
                 {/* No feed */}
-                <div className={`idcard ${card ? "" : "away"}`} aria-hidden="true">
-                  <div className="band">UNIVERSITY STUDENT ID</div>
-                  <div className="photo" />
-                  <div className="info">
-                    <div className="ln" style={{ width: "85%" }} />
-                    <div className="ln" style={{ width: "60%" }} />
-                    <div className={`num ${phase === "ocr" ? "reading" : ""}`}>{card ? card.id : "0000-00000"}</div>
-                  </div>
-                  <div className="bars" />
-                  {glare && <div className="glare" />}
-                </div>
                 {phase === "idle" && (
                   <CameraStage cam={cam} onRetry={() => { setDeviceId(null); setCameraOn(false); setTimeout(() => setCameraOn(true), 60); }}
                     onUseIllustration={() => setCameraOn(false)} />
-                )}
-                {phase !== "idle" && (
-                  <div className="frame" aria-hidden="true">
-                    <span className="corner tl" /><span className="corner tr" /><span className="corner bl" /><span className="corner br" />
-                    {phase === "barcode" && <div className="sweep" />}
-                  </div>
                 )}
                 {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
               </>
@@ -993,7 +914,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
         {/* Pipeline + manual entry */}
         <div className="lg:col-span-3 flex flex-col gap-4 min-w-0">
           <ol className="steps" aria-label="Identification steps">
-            {[["barcode", "QR / barcode"], ["ocr", "Student number (OCR)"], ["match", "Bayesian match"], ["result", "Result"]].map(([id, label]) => (
+            {[["ocr", "Student number (OCR)"], ["match", "Bayesian match"], ["result", "Result"]].map(([id, label]) => (
               <li key={id} className={`step ${stepState(id)}`}>{label}</li>
             ))}
           </ol>
@@ -1027,14 +948,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
         </div>
       </div>
 
-      <details className="demo panel p-4" open={!gateMode}>
-        <summary>Demo scenarios for testing and presentations</summary>
-        <div className="flex flex-wrap gap-2 mt-3">
-          {SCENARIOS.map(([k, label]) => (
-            <button key={k} className="btn btn-sm" disabled={busy || !cameraUsable || result?.type === "confirm"} onClick={() => run(k)}>{label}</button>
-          ))}
-        </div>
-      </details>
     </div>
   );
 }
@@ -1058,9 +971,9 @@ function DigitDiff({ id, read }) {
 }
 
 function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm, onNone, onManual }) {
-  if (phase === "barcode" || phase === "ocr" || phase === "checking") {
-    const title = phase === "checking" ? "Checking the guest list" : phase === "barcode" ? "Reading code" : "Barcode unreadable";
-    const text = phase === "checking" ? "One moment." : phase === "barcode" ? "Keep it steady inside the frame." : "Reading the printed student number instead. Keep the ID still.";
+  if (phase === "ocr" || phase === "checking") {
+    const title = phase === "checking" ? "Checking the guest list" : "Reading student number";
+    const text = phase === "checking" ? "One moment." : "Keep the ID still.";
     return (
       <div className="result idle">
         <div className="state"><ScanLine size={24} color="var(--accent)" /> {title}</div>
@@ -1074,8 +987,8 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
         <div className="state">{camera ? <ScanLine size={24} color="var(--accent)" /> : <AlertTriangle size={24} color="var(--warn)" />} {camera ? "Ready for the next attendee" : "Scanning paused"}</div>
         <p className="muted text-lg">{camera
           ? (live
-            ? "Camera is live. Ask the attendee to show their QR ticket, or the barcode on their student ID, inside the frame. It checks in as soon as the code is read. If the barcode won't scan, press Read printed number."
-            : "Ask the attendee to show their QR ticket or student ID inside the frame. If the code can't be read, SELAE reads the printed student number.")
+            ? "Camera is live. Ask the attendee to hold their student ID up to the camera, close and steady. It checks in by itself as soon as it reads the student number. If nothing happens, use manual entry."
+            : "Ask the attendee to hold their student ID up to the camera.")
           : "The camera is off. Use manual entry to keep checking attendees in."}</p>
       </div>
     );
@@ -1217,9 +1130,7 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
       return (
         <div className="result warn">
           <div className="state"><HelpCircle size={28} /> Couldn't read this ID</div>
-          <p className="text-lg">{result.noDigits
-            ? "OCR couldn't find a student number in the frame. Hold the ID flat inside the frame, tilt it away from the light, and try again, or use manual entry."
-            : "Neither the barcode nor the student number could be read. Type the student number or name in manual entry."}</p>
+          <p className="text-lg">{"The student number could not be read. Type the student number or name in manual entry."}</p>
           <button className="btn btn-on mt-auto" onClick={onManual}><Keyboard size={16} /> Go to manual entry</button>
         </div>
       );
@@ -1422,7 +1333,7 @@ function MatcherPanel({ m, onToast, refresh }) {
 
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
         <div><dt className="text-sm muted">OCR reads</dt><dd className="text-2xl font-bold">{scans.total}</dd>
-          <dd className="text-sm faint">{scans.auto} automatic, {scans.confirm} asked, {scans.reject} no match{scans.demo ? `; ${scans.demo} from demos` : ""}</dd></div>
+          <dd className="text-sm faint">{scans.auto} automatic, {scans.confirm} asked, {scans.reject} no match{scans.demo ? `; ${scans.demo} demo reads not counted` : ""}</dd></div>
         <div><dt className="text-sm muted">Right student ranked first</dt>
           <dd className="text-2xl font-bold">{scans.labelled ? pct(scans.top1 / scans.labelled) : "No data"}</dd>
           <dd className="text-sm faint">{scans.labelled ? `${scans.top1} of ${scans.labelled} reads an operator resolved; top 3: ${scans.top3}` : "Appears once an operator resolves a read"}</dd></div>
@@ -1454,7 +1365,7 @@ function MatcherPanel({ m, onToast, refresh }) {
               {m.recent.map((r, i) => (
                 <li key={i} className="flex flex-wrap justify-between gap-x-3">
                   <span><span className="font-bold">{r.read}</span> <span className="muted">{DECISION_LABEL[r.decision]}{r.top ? `, ${sure(r.top.p)}` : ""}</span></span>
-                  <span className="faint">{r.resolution ? RESOLUTION_LABEL[r.resolution] : "open"}{r.learned && r.learned.length ? `, learned ${r.learned.join(", ")}` : ""}</span>
+                  <span className="faint">{r.demo ? "Demo, " : ""}{r.resolution ? RESOLUTION_LABEL[r.resolution] : "open"}{r.learned && r.learned.length ? `, learned ${r.learned.join(", ")}` : ""}</span>
                 </li>
               ))}
             </ul>
@@ -1468,17 +1379,16 @@ function MatcherPanel({ m, onToast, refresh }) {
 /* ---------------- test tickets ---------------- */
 function TestTickets({ data, eventId, onOpenScanner }) {
   const groups = useMemo(() => {
-    const ticket = (r) => ({ key: r.id, student: data.student(r.studentId), value: `SELAE1:${eventId}:${r.code}` });
+    const ticket = (r) => ({ key: r.id, student: data.student(r.studentId) });
     const notReg = [...data.byId.values()].filter((s) => !data.regByStudent.has(s.id)).slice(0, 3);
     return [
       { key: "ok", title: "Going, not yet checked in", expect: "Checks in (green)", list: data.going.filter((r) => !r.checkin).slice(0, 6).map(ticket) },
       { key: "dup", title: "Already checked in", expect: "Already checked in (blue)", list: data.going.filter((r) => r.checkin).slice(0, 3).map(ticket) },
       { key: "wait", title: "On the waitlist", expect: "On the waitlist (red)", list: data.waitlist.slice(0, 3).map(ticket) },
-      { key: "notreg", title: "Student ID only, not registered", expect: "Not registered (red)",
-        note: "These encode a student number, like the barcode on a student ID.",
-        list: notReg.map((s) => ({ key: s.id, student: s, value: s.id })) },
+      { key: "notreg", title: "On file, not registered", expect: "Not registered (red)",
+        list: notReg.map((s) => ({ key: s.id, student: s })) },
     ].filter((g) => g.list.length);
-  }, [data, eventId]);
+  }, [data]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1486,10 +1396,10 @@ function TestTickets({ data, eventId, onOpenScanner }) {
         <div style={{ maxWidth: 720 }}>
           <h2 className="font-bold text-2xl">Test tickets</h2>
           <p className="muted mt-1">
-            Real QR tickets for guests of this event. Print this page, or open it on a phone and hold the screen up to the webcam on
+            Student numbers for guests of this event. Print this page, or open it on a phone and hold the screen up to the webcam on
             the scanner. Each group shows the result you should get. The groups update as people check in.
           </p>
-          <p className="faint text-sm mt-2">The best test is a real one: register on your phone from the event page, then scan the ticket you get.</p>
+          <p className="faint text-sm mt-2">The best test is a real one: register with your student number, then show your student ID to the scanner.</p>
         </div>
         <div className="flex gap-2">
           <button className="btn" onClick={() => window.print()}><Printer size={17} /> Print</button>
@@ -1509,8 +1419,8 @@ function TestTickets({ data, eventId, onOpenScanner }) {
             {g.list.map((t) => (
               <div key={t.key} className="testcard">
                 <div className="font-bold">{formatName(t.student)}</div>
-                <div className="text-sm" style={{ color: "#5A6386" }}>{t.student.id}{t.student.section ? `, ${t.student.section}` : ""}</div>
-                <QrCode value={t.value} size={170} label={`QR code for ${formatName(t.student)}`} />
+                <div className="text-sm" style={{ color: "#5A6386" }}>{t.student.section}</div>
+                <div className="font-bold text-2xl">Student No: {t.student.id.replace("-", "")}</div>
               </div>
             ))}
           </div>

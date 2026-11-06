@@ -25,18 +25,20 @@ if (!fs.existsSync(path.join(dist, "index.html"))) {
 http.createServer(async (req, res) => {
   try {
     if ((await api(req, res, null)) || res.writableEnded || res.headersSent) return;
+    const url = new URL(req.url, "http://x");
+    let pathname;
+    try { pathname = decodeURIComponent(url.pathname); }
+    catch { res.statusCode = 400; res.end("Bad request"); return; }
+    let file = path.normalize(path.join(dist, pathname));
+    if (!file.startsWith(dist) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dist, "index.html");
+    res.setHeader("Content-Type", TYPES[path.extname(file)] || "application/octet-stream");
+    if (file.includes(`${path.sep}assets${path.sep}`)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.statusCode = 500; res.end(); }).pipe(res);
   } catch (e) {
     // Request errors
     console.error(e);
     if (!res.headersSent) { res.statusCode = 500; res.end(); }
-    return;
   }
-  const url = new URL(req.url, "http://x");
-  let file = path.normalize(path.join(dist, decodeURIComponent(url.pathname)));
-  if (!file.startsWith(dist) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dist, "index.html");
-  res.setHeader("Content-Type", TYPES[path.extname(file)] || "application/octet-stream");
-  if (file.includes(`${path.sep}assets${path.sep}`)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-  fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.statusCode = 500; res.end(); }).pipe(res);
 }).listen(PORT, "0.0.0.0", () => {
   console.log(`\nSELAE is running.\n`);
   console.log(`  Organizer (this laptop, camera works here):  http://localhost:${PORT}`);

@@ -20,7 +20,10 @@ class HttpError extends Error {
 }
 const fail = (status, message) => { throw new HttpError(status, message); };
 
-const isLocal = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
+const FORWARDED_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip"];
+// Requests through a tunnel or proxy reach us from loopback, but aren't local
+const isLocal = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress)
+  && !FORWARDED_HEADERS.some((h) => req.headers[h]);
 
 /* ---------- name standardization (Surname, Given M.) ---------- */
 function tidyName(raw) {
@@ -62,10 +65,9 @@ function publicEvent(data, req, e) {
 }
 function ticketView(data, req, reg) {
   const event = data.events.find((e) => e.id === reg.eventId);
-  const student = data.directory[reg.studentId];
+  const student = reg.student || data.directory[reg.studentId];
   return {
     code: reg.code, status: reg.status, createdAt: reg.createdAt, checkin: reg.checkin,
-    qr: `SELAE1:${reg.eventId}:${reg.code}`,
     student, event: event ? publicEvent(data, req, event) : null,
   };
 }
@@ -106,7 +108,7 @@ function eventFields(body, existing = {}) {
 }
 
 /* ---------- check-in rules ---------- */
-function checkIn(data, event, body) {
+function checkIn(data, event, body, canLearn) {
   const now = new Date().toISOString();
   const method = ["qr", "barcode", "ocr", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
   const confidence = typeof body.confidence === "number" ? Math.max(0, Math.min(1, body.confidence)) : null;
@@ -133,7 +135,7 @@ function checkIn(data, event, body) {
     reg = data.registrations.find((r) => r.eventId === event.id && r.studentId === studentId && r.status !== "cancelled") || null;
   }
 
-  resolveScan(data, event, body, method, studentId);
+  const learned = resolveScan(data, event, body, method, studentId, canLearn);
 
   const student = data.directory[studentId] || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
   if (!reg || reg.status === "cancelled") { log("notreg", studentId); return { outcome: "notreg", time: now, student }; }
@@ -142,11 +144,13 @@ function checkIn(data, event, body) {
   if (body.forceFull || counts(data, event.id).checkedIn >= event.capacity) { log("full", studentId); return { outcome: "full", time: now, student }; }
   reg.checkin = { time: now, method, confidence };
   log("approved", studentId, { confidence });
-  return { outcome: "approved", time: now, student, checkin: reg.checkin };
+  return { outcome: "approved", time: now, student, checkin: reg.checkin, learned: Boolean(learned) };
 }
 
 /* ---------- OCR matching (see matcher.js) ---------- */
 const MAX_SCANS = 3000;
+const REGISTER_LIMIT = 20;
+const REGISTER_WINDOW = 60000;
 
 function peopleFor(data, event) {
   const regs = new Map();
@@ -182,19 +186,23 @@ function matchRead(data, event, body) {
   };
 }
 
-function resolveScan(data, event, body, method, studentId) {
-  if (!body.scanId) return;
+function resolveScan(data, event, body, method, studentId, canLearn) {
+  if (!body.scanId) return null;
   const scan = (data.ocrScans || []).find((s) => s.id === body.scanId && s.eventId === event.id);
-  if (!scan || (scan.resolution && scan.resolution !== "none")) return;
+  if (!scan || (scan.resolution && scan.resolution !== "none")) return null;
   scan.resolution = method === "ocr" ? "auto" : method === "confirmed" ? "confirmed" : "manual";
   scan.truth = studentId;
   scan.rank = scan.candidates.findIndex((c) => c.id === studentId);
-  if (method === "confirmed" || method === "manual") scan.learned = learn(ensureModel(data), scan.read, studentId);
+  // Demo reads are simulated, and the model is shared by every event, so only the venue laptop teaches it
+  if (canLearn && scan.source !== "demo" && (method === "confirmed" || method === "manual")) scan.learned = learn(ensureModel(data), scan.read, studentId);
+  return scan.learned;
 }
 
 function matcherSummary(data, eventId) {
   const model = ensureModel(data);
-  const scans = data.ocrScans.filter((s) => s.eventId === eventId);
+  const allScans = data.ocrScans.filter((s) => s.eventId === eventId);
+  // Stats cover real reads only
+  const scans = allScans.filter((s) => s.source !== "demo");
   const by = (k, v) => scans.filter((s) => s[k] === v).length;
   const labelled = scans.filter((s) => s.resolution === "confirmed" || s.resolution === "manual");
   return {
@@ -211,10 +219,10 @@ function matcherSummary(data, eventId) {
       top1: labelled.filter((s) => s.rank === 0).length,
       top3: labelled.filter((s) => s.rank >= 0).length,
       none: by("resolution", "none"),
-      demo: by("source", "demo"),
+      demo: allScans.length - scans.length,
     },
-    recent: scans.slice(-8).reverse().map((s) => ({ time: s.time, read: pretty(s.read), decision: s.decision, top: s.candidates[0] || null,
-      resolution: s.resolution, truth: s.truth, learned: s.learned })),
+    recent: allScans.slice(-8).reverse().map((s) => ({ time: s.time, read: pretty(s.read), decision: s.decision, top: s.candidates[0] || null,
+      resolution: s.resolution, truth: s.truth, learned: s.learned, demo: s.source === "demo" })),
   };
 }
 
@@ -278,9 +286,9 @@ function notificationsFor(data, req, body) {
     if (!e) continue;
     const start = new Date(e.startsAt).getTime(), end = new Date(e.endsAt).getTime();
     if (r.status === "going" && r.promotedAt) add(r.promotedAt, { kind: "promoted", ...brief(e), code: r.code, text: `You're in! You moved off the waitlist for ${e.title}.` });
-    else if (r.status === "going") add(r.createdAt, { kind: "registered", ...brief(e), code: r.code, text: `You're going to ${e.title}. Your QR ticket is ready.` });
+    else if (r.status === "going") add(r.createdAt, { kind: "registered", ...brief(e), code: r.code, text: `You're going to ${e.title}. Show your student ID at the entrance.` });
     else if (r.status === "waitlist") add(r.createdAt, { kind: "waitlist", ...brief(e), code: r.code, text: `You're on the waitlist for ${e.title}.` });
-    if (r.status === "going" && !r.checkin && start > now && start - now < DAY) add(start - DAY, { kind: "soon", ...brief(e), code: r.code, text: `${e.title} starts within a day. Keep your ticket handy.` });
+    if (r.status === "going" && !r.checkin && start > now && start - now < DAY) add(start - DAY, { kind: "soon", ...brief(e), code: r.code, text: `${e.title} starts within a day. Keep your student ID handy.` });
     if (r.checkin) add(r.checkin.time, { kind: "checkin", ...brief(e), code: r.code, text: `Checked in at ${e.title}. Enjoy!` });
     const photos = e.photos || [];
     if (r.checkin && photos.length && end < now) add(photos[photos.length - 1].uploadedAt, { kind: "photos", ...brief(e), text: photos.length === 1 ? `A photo from ${e.title} is up.` : `${photos.length} photos from ${e.title} are up.` });
@@ -358,6 +366,16 @@ export function createApi(store) {
     const name = String(url || "").replace(/^\/uploads\//, "");
     if (UPLOAD_NAME.test(name)) fs.rm(path.join(store.uploadsDir, name), { force: true }, () => {});
   };
+  const registerHits = new Map();
+  const limitRegistrations = (req) => {
+    const now = Date.now();
+    if (registerHits.size > 5000) registerHits.clear();
+    const ip = req.socket.remoteAddress;
+    const hits = (registerHits.get(ip) || []).filter((t) => now - t < REGISTER_WINDOW);
+    if (hits.length >= REGISTER_LIMIT) fail(429, "Too many registrations from this device. Wait a minute and try again.");
+    hits.push(now);
+    registerHits.set(ip, hits);
+  };
   const requireManage = (req, event) => { if (!canManage(req, event)) fail(403, "Only this event's hosts can do that."); };
 
   const routes = [
@@ -390,6 +408,8 @@ export function createApi(store) {
       const event = findEvent(id);
       requireManage(req, event);
       const fields = eventFields(await readBody(req), event);
+      const going = counts(store.data, id).going;
+      if (fields.capacity !== undefined && fields.capacity < going) fail(409, `${going} people are already going, so capacity can't be lower than that.`);
       store.mutate(() => Object.assign(event, fields));
       return publicEvent(store.data, req, event);
     }],
@@ -443,6 +463,7 @@ export function createApi(store) {
       const event = findEvent(id);
       const pub = publicEvent(store.data, req, event);
       if (!pub.registrationOpen) fail(409, pub.isPast ? "This event has already ended." : "Registration is closed for this event.");
+      if (!pub.canManage) limitRegistrations(req);
       const b = await readBody(req);
       const m = String(b.studentId || "").trim().match(STUDENT_ID);
       if (!m) fail(400, "Student number should look like 2024-12345.");
@@ -455,12 +476,19 @@ export function createApi(store) {
       const email = str(b.email, "Email", { max: 120, required: false });
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
 
+      const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
+      if (existing) {
+        // Only hosts, who can already see this ticket, get it back
+        if (!pub.canManage) fail(409, "This student number is already registered for this event. Open the ticket on the device you registered with, or ask the organizer at the gate.");
+        return { existing: true, ticket: ticketView(store.data, req, existing) };
+      }
+
       return store.mutate((d) => {
-        d.directory[studentId] = { id: studentId, last, first, middle, suffix, section };
-        const existing = d.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
-        if (existing) return { existing: true, ticket: ticketView(d, req, existing) };
+        // The first entry stays; the name typed here only goes on this ticket
+        const student = { id: studentId, last, first, middle, suffix, section };
+        if (!d.directory[studentId]) d.directory[studentId] = student;
         const going = counts(d, id).going;
-        const reg = { id: newId(), eventId: id, code: newCode(), studentId, email, status: going < event.capacity ? "going" : "waitlist",
+        const reg = { id: newId(), eventId: id, code: newCode(), studentId, student, email, status: going < event.capacity ? "going" : "waitlist",
           createdAt: new Date().toISOString(), checkin: null };
         d.registrations.push(reg);
         return { existing: false, ticket: ticketView(d, req, reg) };
@@ -481,7 +509,7 @@ export function createApi(store) {
         reg.status = "cancelled";
         const event = d.events.find((e) => e.id === reg.eventId);
         // Promote from waitlist
-        if (wasGoing && event && counts(d, reg.eventId).going < event.capacity) {
+        if (wasGoing && event && Date.now() <= new Date(event.endsAt).getTime() && counts(d, reg.eventId).going < event.capacity) {
           const next = d.registrations
             .filter((r) => r.eventId === reg.eventId && r.status === "waitlist")
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
@@ -513,7 +541,7 @@ export function createApi(store) {
       const event = findEvent(id);
       requireManage(req, event);
       const body = await readBody(req);
-      return store.mutate((d) => checkIn(d, event, body));
+      return store.mutate((d) => checkIn(d, event, body, isLocal(req)));
     }],
 
     ["POST", /^\/api\/events\/([\w-]+)\/log$/, async (req, [id]) => {
@@ -545,11 +573,13 @@ export function createApi(store) {
       return { ok: true };
     }],
 
-    ["POST", /^\/api\/events\/([\w-]+)\/registrations\/([\w-]+)\/promote$/, (req, [id, regId]) => {
+    ["POST", /^\/api\/events\/([\w-]+)\/registrations\/([\w-]+)\/promote$/, async (req, [id, regId]) => {
       const event = findEvent(id);
       requireManage(req, event);
       const reg = store.data.registrations.find((r) => r.id === regId && r.eventId === id) || fail(404, "Registration not found.");
       if (reg.status !== "waitlist") fail(409, "Only waitlisted guests can be moved to going.");
+      const b = await readBody(req);
+      if (!b.force && counts(store.data, id).going >= event.capacity) fail(409, "This event is full. Confirm to go over capacity.");
       store.mutate(() => { reg.status = "going"; reg.promotedAt = new Date().toISOString(); reg.promotedBy = "organizer"; });
       return { ok: true };
     }],
@@ -578,12 +608,13 @@ export function createApi(store) {
     const url = new URL(req.url, "http://x");
     const upload = url.pathname.match(/^\/uploads\/([^/]+)$/);
     if (upload && req.method === "GET") {
-      const name = decodeURIComponent(upload[1]);
+      let name = "";
+      try { name = decodeURIComponent(upload[1]); } catch { /* bad encoding: 404 below */ }
       const file = path.join(store.uploadsDir, name);
       if (!UPLOAD_NAME.test(name) || !fs.existsSync(file)) { res.statusCode = 404; res.end(); return true; }
       res.setHeader("Content-Type", UPLOAD_TYPES[name.split(".").pop()]);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      fs.createReadStream(file).pipe(res);
+      fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.statusCode = 500; res.end(); }).pipe(res);
       return true;
     }
     if (!url.pathname.startsWith("/api/")) return next ? next() : false;

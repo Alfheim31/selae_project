@@ -24,8 +24,8 @@ internet connection is needed (fonts and the OCR engine are bundled too).
 - **Event page** — date, venue, host, description, and a registration form. Names
   are standardized to *Surname, Given Name M.* ("DELA CRUZ" becomes "Dela Cruz").
   When the event is full, people join a **waitlist**. After the event, its photos.
-- **Boarding-pass ticket** — shown right after registering, with the QR code for
-  the gate. It updates live (going, waitlist, checked in) and can be cancelled.
+- **Boarding-pass ticket** — shown right after registering, with the event, the
+  student number, the status, and a reminder to show the student ID at the entrance.
 - **Notifications** (bell in the top bar) — moved off the waitlist, event starting
   within a day, checked in, photos posted, new events from calendars you follow;
   for hosts, registration counts and a reminder to add photos. A live clock sits
@@ -40,9 +40,8 @@ internet connection is needed (fonts and the OCR engine are bundled too).
   of coming, and recommends how many people to **release off the waitlist**
   (see below).
 - **Scanner** — opens centered over the dashboard (**Open scanner**). A live webcam
-  reads **QR tickets** and **student ID barcodes**. When a code won't scan, **Read
-  printed number** reads the student number off the ID with OCR, and a Bayesian
-  matcher works out who it is (see below). Manual entry, and **Lock for
+  reads the printed student number off the ID with OCR, without any button, and a
+  Bayesian matcher works out who it is (see below). Manual entry, and **Lock for
   volunteers** so the scanner can't be closed by accident (hold to unlock).
 - **Analytics** — show-up rate, check-ins over time, attendance by section, how
   each attendee was identified, how the OCR matcher and the turnout model are
@@ -50,7 +49,7 @@ internet connection is needed (fonts and the OCR engine are bundled too).
 - **Photos** — once the event has ended, upload photos from the day (drag and drop
   or pick several; they're resized in the browser first). They show on the event
   page and in Discover, and guests who checked in get a notification.
-- **Test tickets** — live QR codes for guests, to test or demo the scanner.
+- **Test tickets** — printed student numbers for guests, to test or demo the scanner.
 - **Invite & settings** — a QR code and link to the registration page, a co-host
   link, and the event details, including the **cover photo** and closing
   registration.
@@ -68,7 +67,7 @@ through `@fontsource` so they work offline.
 
 - Node.js 20 or newer
 - A webcam on the laptop at the gate (the app still works without one: manual
-  entry and the demo scenarios cover it)
+  entry covers it)
 
 ## Running it
 
@@ -123,16 +122,21 @@ To start over, stop the server and delete the file. A data file from before the
 turnout forecast has no past events, so the forecast falls back to an average
 show-up rate until you delete it or run real events. To keep a different file, set `SELAE_DATA=path/to/file.json`.
 
+Changes are saved within 200 ms and on shutdown, so a sudden power cut can lose the
+last moment of activity. Each save keeps the previous version as `selae.json.bak`.
+If the data file can't be read at startup, SELAE keeps a `.corrupt` copy of it and
+restores the backup.
+
 ## Intelligent component 1: OCR matching that learns
 
-When a QR ticket or ID barcode can't be read, SELAE reads the printed student
-number and decides who the attendee is. OCR under glare makes mistakes, so this
+SELAE reads the printed student number and decides who the attendee is. OCR under glare makes mistakes, so this
 is a decision under uncertainty, not a lookup. It works like an agent:
 
-1. **Perceives.** Tesseract (`src/ocr.js`) reads the frame inside the gold box,
-   in the browser and offline. Each frame is read up to three ways (contrast
-   stretched, glare-corrected with a local threshold, and binarized) and the
-   most number-like result kept, with Tesseract's confidence for each digit.
+1. **Perceives.** Tesseract (`src/ocr.js`) keeps reading the whole visible camera
+   frame, in the browser and offline. Each read tries one color channel and tilt
+   correction, sharpens the image and keeps only text shaped like a student number
+   (nine digits starting with 19 or 20). Blue comes first because it separates pale
+   text from red ID backgrounds best. The same number has to be read twice within 30 seconds.
 2. **Knows how OCR fails.** `server/matcher.js` holds a confusion matrix,
    P(read digit | true digit), plus chances of a dropped or extra digit. It
    starts from general OCR knowledge (8 and 3, 1 and 7, 5 and 6 get swapped
@@ -279,24 +283,17 @@ real), and the held-out scores there become the ones to report.
 ## Testing the scanner
 
 1. On your phone (same Wi-Fi), scan the QR code in **Invite & settings** and
-   register. You get a QR ticket.
+   register with the student number on your ID.
 2. On the laptop, open the event's dashboard, press **Open scanner** and allow the camera.
-3. Hold the phone up to the webcam with the ticket inside the gold frame. It checks
-   in within about half a second, and the ticket on your phone switches to
-   "Checked in". Scan it again and you get "Already checked in".
+3. Hold the ID up to the webcam, close and steady. There is no button and no set
+   position: it checks in by itself once it has read the student number twice.
+   Show it again later and you get "Already checked in".
 
-**Test tickets** has more QR codes to try: guests who will check in, guests already
-checked in, waitlisted guests, and plain student numbers that aren't registered.
-If a code doesn't read, move it closer and turn the screen brightness up.
+**Test tickets** has more student numbers to try: guests who will check in, guests
+already checked in, waitlisted guests, and students who aren't registered.
 
-To try OCR, hold a student ID (or a card with a number like 2024-12345 printed
-on it) flat inside the gold frame and press **Read printed number**. The demo
-scenarios **Glare, OCR succeeds** and **Glare, low-confidence OCR** simulate the
-OCR output (the card on screen is a drawing), but the matching, the decision and
-the learning are real.
-
-Leaving a code in front of the camera won't check it in twice: it has to leave the
-frame for 1.5 seconds before it can be read again.
+Leaving an ID in front of the camera won't repeat the result: the same number is
+ignored until it has been out of view for a minute.
 
 ## Project layout
 
@@ -318,7 +315,6 @@ src/
                        event page, registration, ticket, create event
   shared.jsx           design system (styles), sky covers, barcodes, formatting, QR code
   camera.jsx           webcam access, beeps, hold-to-exit
-  barcode.js           live QR / barcode decoding from the camera (zxing-cpp)
   ocr.js               OCR of the printed student number (Tesseract), with glare correction
   forecast.jsx         turnout forecast panel, waitlist release, turnout model panel
   images.js            resizes photos in the browser before upload
@@ -336,7 +332,7 @@ scripts/
 - recharts for charts, lucide-react for icons
 - zxing-wasm (zxing-cpp compiled to WebAssembly) for decoding; bundled with the
   app, so scanning works offline
-- qrcode for generating QR tickets
+- qrcode for the registration page QR code
 - tesseract.js for OCR; its worker, engine and English model are copied into the
   build from node_modules, so OCR also works offline
 
@@ -345,6 +341,15 @@ scripts/
 - Accounts and passwords; email or SMS confirmations
 - Exit scanning, so "checked in" counts arrivals, not people currently inside
 - Importing a registration list
+
+## Known limitations
+
+- Host keys travel over plain HTTP, so anyone on the same Wi-Fi could capture one.
+- Anyone can create an event, and a host's event page receives the full student
+  directory, because the scanner's search and matcher use it.
+- Registration is limited to 20 attempts a minute per address, but without an official
+  roster SELAE can't tell whether a student number is real.
+- A check-in can't be undone yet.
 
 ## Note for the Java build
 

@@ -350,7 +350,7 @@ export function Discover({ drawerId }) {
             <div className="tag" style={{ color: "rgba(255,255,255,.85)" }}>Departures · {upcoming.length} upcoming</div>
             <h1 className="page-title" style={{ color: "#fff", marginTop: ".4rem", textShadow: "0 2px 20px rgba(20,27,58,.25)" }}>Discover</h1>
             <p className="mt-3 text-lg" style={{ maxWidth: "40ch", color: "rgba(255,255,255,.92)" }}>
-              Workshops, talks, hack nights and more on campus. Find one, register in seconds, and get a pass for the gate.
+              Workshops, talks, hack nights and more on campus. Find one, register in seconds, and show your student ID at the entrance.
             </p>
             <label className="field mt-5" style={{ maxWidth: 520, display: "block" }}>
               <Search size={18} />
@@ -806,7 +806,7 @@ export function TicketPage({ code }) {
             <div className="relative text-sm mt-1" style={{ opacity: .9 }}>{event.hostName || "SELAE event"}</div>
           </div>
           <div className="facts p-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <div className="fact" style={{ gridColumn: "1 / -1" }}><div className="tag">Passenger</div><div className="v">{formatName(student)}</div><div className="s mono">{student.id}{student.section ? ` · ${student.section}` : ""}</div></div>
+            <div className="fact" style={{ gridColumn: "1 / -1" }}><div className="tag">Student number</div><div className="v mono">{student.id}</div></div>
             <div className="fact"><div className="tag">Date</div><div className="v">{fmtDate(event.startsAt, { month: "short", day: "numeric" })}</div></div>
             <div className="fact"><div className="tag">Boards</div><div className="v">{fmtTime(event.startsAt)}</div></div>
             <div className="fact"><div className="tag">Gate</div><div className="v" style={{ fontSize: "1.1rem" }}>{event.venue}</div></div>
@@ -817,17 +817,12 @@ export function TicketPage({ code }) {
           </div>
           <div className="tear" />
           <div className="p-5 flex flex-col items-center gap-3 text-center">
-            {!cancelled ? (
-              <>
-                <QrCode value={ticket.qr} size={232} label={`QR ticket for ${formatName(student)}`} />
-                <div className="mono faint text-sm" style={{ letterSpacing: ".12em" }}>{prettyCode(ticket.code)}</div>
-                <p className="muted text-sm" style={{ maxWidth: "32ch" }}>
-                  {ticket.status === "waitlist" ? "This pass starts working at the gate once you're moved off the waitlist."
-                    : ticket.checkin ? "You're in. Enjoy the event." : "Show this at the entrance. Turn your screen brightness up."}
-                </p>
-              </>
-            ) : <p className="muted">This registration was cancelled.</p>}
-            <div style={{ width: "100%", maxWidth: 300, opacity: .85 }}><Barcode value={ticket.code} height={26} color="var(--text)" /></div>
+            <p className="font-bold">
+              {cancelled ? "This registration was cancelled."
+                : ticket.checkin ? "You're in. Enjoy the event."
+                : ticket.status === "waitlist" ? "You're on the waitlist. You can check in once you're moved to going."
+                : "Show your student ID at the entrance."}
+            </p>
           </div>
         </div>
       </div>
