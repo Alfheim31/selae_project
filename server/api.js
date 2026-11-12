@@ -110,7 +110,7 @@ function eventFields(body, existing = {}) {
 /* ---------- check-in rules ---------- */
 function checkIn(data, event, body, canLearn) {
   const now = new Date().toISOString();
-  const method = ["qr", "barcode", "ocr", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
+  const method = ["qr", "barcode", "ocr", "face", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
   const confidence = typeof body.confidence === "number" ? Math.max(0, Math.min(1, body.confidence)) : null;
   const log = (outcome, studentId, extra = {}) =>
     data.logs.push({ uid: newId(), eventId: event.id, time: now, studentId: studentId || null, outcome, method, ...extra });
@@ -183,6 +183,70 @@ function matchRead(data, event, body) {
     scanId: scan.id, read: pretty(read), decision: out.decision, pUnknown: out.pUnknown, thresholds: out.thresholds,
     candidates: out.candidates.map((c) => ({ p: c.p, status: statusOf(c.reg),
       student: data.directory[c.id] || { id: c.id, last: "", first: "", middle: "", suffix: "", section: "" } })),
+  };
+}
+
+// Euclidean distance matching helper
+function euclideanDistance(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== 128 || b.length !== 128) return Infinity;
+  let sum = 0;
+  for (let i = 0; i < 128; i++) {
+    const d = a[i] - b[i];
+    sum += d * d;
+  }
+  return Math.sqrt(sum);
+}
+
+const FACE_AUTO_THRESHOLD = 0.48;
+const FACE_CONFIRM_THRESHOLD = 0.58;
+
+function matchFace(data, event, body) {
+  const desc = body.descriptor;
+  if (!Array.isArray(desc) || desc.length !== 128 || !desc.every((n) => typeof n === "number" && Number.isFinite(n))) {
+    fail(400, "Send a valid 128-float face descriptor.");
+  }
+
+  const regs = new Map();
+  for (const r of data.registrations) {
+    if (r.eventId === event.id && r.status !== "cancelled") regs.set(r.studentId, r);
+  }
+
+  const scored = [];
+  for (const s of Object.values(data.directory)) {
+    const reg = regs.get(s.id) || null;
+    const targetDesc = (reg && reg.faceDescriptor) || s.faceDescriptor;
+    if (!targetDesc) continue;
+
+    const dist = euclideanDistance(desc, targetDesc);
+    // Convert distance [0, 1.0+] into a confidence score [0, 1]
+    const p = Math.max(0, Math.min(1, 1 - dist / 1.0));
+    scored.push({
+      id: s.id,
+      dist,
+      p,
+      status: statusOf(reg),
+      student: s,
+    });
+  }
+
+  scored.sort((a, b) => a.dist - b.dist);
+  const candidates = scored.slice(0, 3);
+  const top = candidates[0] || null;
+
+  let decision = "reject";
+  if (top) {
+    if (top.dist <= FACE_AUTO_THRESHOLD) decision = "auto";
+    else if (top.dist <= FACE_CONFIRM_THRESHOLD) decision = "confirm";
+  }
+
+  return {
+    decision,
+    candidates: candidates.map((c) => ({
+      p: c.p,
+      dist: Math.round(c.dist * 1000) / 1000,
+      status: c.status,
+      student: c.student,
+    })),
   };
 }
 
@@ -475,7 +539,15 @@ export function createApi(store) {
       const section = str(b.section, "Section", { max: 30 }).toUpperCase().replace(/\s+/g, " ");
       const email = str(b.email, "Email", { max: 120, required: false });
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
-
+      // Validates faceDescriptor if provided, but allows null for OCR-only use.
+      let faceDescriptor = null;
+      if (b.faceDescriptor !== undefined && b.faceDescriptor !== null) {
+        if (!Array.isArray(b.faceDescriptor) || b.faceDescriptor.length !== 128 || !b.faceDescriptor.every((x) => typeof x === "number" && Number.isFinite(x))) {
+          fail(400, "Invalid facial scan data.");
+        }
+        faceDescriptor = b.faceDescriptor;
+      }
+      
       const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
       if (existing) {
         // Only hosts, who can already see this ticket, get it back
@@ -485,10 +557,14 @@ export function createApi(store) {
 
       return store.mutate((d) => {
         // The first entry stays; the name typed here only goes on this ticket
-        const student = { id: studentId, last, first, middle, suffix, section };
-        if (!d.directory[studentId]) d.directory[studentId] = student;
+        const student = { id: studentId, last, first, middle, suffix, section, ...(faceDescriptor ? { faceDescriptor } : {}) };
+        if (!d.directory[studentId]) {
+          d.directory[studentId] = student;
+        } else {
+          d.directory[studentId].faceDescriptor = faceDescriptor;
+        }
         const going = counts(d, id).going;
-        const reg = { id: newId(), eventId: id, code: newCode(), studentId, student, email, status: going < event.capacity ? "going" : "waitlist",
+        const reg = { id: newId(), eventId: id, code: newCode(), studentId, student, faceDescriptor, email, status: going < event.capacity ? "going" : "waitlist",
           createdAt: new Date().toISOString(), checkin: null };
         d.registrations.push(reg);
         return { existing: false, ticket: ticketView(d, req, reg) };
@@ -564,6 +640,14 @@ export function createApi(store) {
       requireManage(req, event);
       const body = await readBody(req);
       return store.mutate((d) => matchRead(d, event, body));
+    }],
+
+    // Face match
+    ["POST", /^\/api\/events\/([\w-]+)\/match-face$/, async (req, [id]) => {
+      const event = findEvent(id);
+      requireManage(req, event);
+      const body = await readBody(req);
+      return matchFace(store.data, event, body);
     }],
 
     // Reset matcher

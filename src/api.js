@@ -94,6 +94,7 @@ export const api = {
   checkin: (id, body) => request("POST", `/api/events/${id}/checkin`, body),
   logUnresolved: (id, method, scanId) => request("POST", `/api/events/${id}/log`, { outcome: "unresolved", method, scanId }),
   match: (id, body) => request("POST", `/api/events/${id}/match`, body),
+  matchFace: (id, body) => request("POST", `/api/events/${id}/match-face`, body),
   resetMatcher: () => request("POST", "/api/matcher/reset"),
   promote: (id, regId, force) => request("POST", `/api/events/${id}/registrations/${regId}/promote`, { force: Boolean(force) }),
   release: (id, risk) => request("POST", `/api/events/${id}/release`, { risk }),

@@ -368,8 +368,8 @@ export function lev(a, b) {
   return d[a.length][b.length];
 }
 
-export const METHOD_LABEL = { qr: "QR ticket", barcode: "ID barcode", ocr: "OCR", confirmed: "Operator confirmed", manual: "Manual entry" };
-export const METHOD_SHORT = { qr: "QR", barcode: "ID barcode", ocr: "OCR", confirmed: "Confirmed", manual: "Manual" };
+export const METHOD_LABEL = { qr: "QR ticket", barcode: "ID barcode", face: "Face scan", ocr: "OCR", confirmed: "Operator confirmed", manual: "Manual entry" };
+export const METHOD_SHORT = { qr: "QR", barcode: "ID barcode", face: "Face", ocr: "OCR", confirmed: "Confirmed", manual: "Manual" };
 export const OUTCOME_LABEL = {
   approved: "Checked in", notreg: "Not registered", dup: "Already checked in", full: "Venue at capacity",
   unresolved: "Couldn't identify", waitlist: "On the waitlist", wrongevent: "Ticket for another event",

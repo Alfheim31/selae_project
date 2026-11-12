@@ -15,6 +15,9 @@ import {
 import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "./forecast.jsx";
 import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox } from "./public.jsx";
 import { prepareImage } from "./images.js";
+// Face recognition imports
+import { extractFaceDescriptor, euclideanDistance } from "./face.js";
+
 
 /* SELAE — Smart Event Logistics and Analytics Engine */
 
@@ -444,7 +447,7 @@ const chartTip = { background: "#FFFFFF", border: "1px solid #DCE2EE", borderRad
 
 function MethodChip({ method, confidence }) {
   if (!method) return null;
-  const conf = (method === "ocr" || method === "confirmed") && confidence != null ? ` ${pct(confidence)}` : "";
+  const conf = (method === "ocr" || method === "face" || method === "confirmed") && confidence != null ? ` ${pct(confidence)}` : "";
   return <span className={`chip ${method}`} title={METHOD_LABEL[method]}>{METHOD_SHORT[method]}{conf}</span>;
 }
 
@@ -641,6 +644,7 @@ function makeActions(data) {
 function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const { checkins, capacity, event } = data;
   const actions = useMemo(() => makeActions(data), [data]);
+  const [scanMode, setScanMode] = useState("face"); // "face" | "ocr" | "both"
   const [phase, setPhase] = useState("idle");
   const [result, setResult] = useState(null);
   const [cameraOn, setCameraOn] = useState(true);
@@ -657,6 +661,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const scanToken = useRef(0);
   const pendingScan = useRef(null);
   const lastCard = useRef(null);
+  const lastFace = useRef(null);
   const beep = useBeep(sound);
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
@@ -735,12 +740,43 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     }
   };
 
-  // Continuous student number scan
+  // Face Match handler
+  const matchFaceRead = async (descriptor) => {
+    const token = scanToken.current;
+    setPath((p) => [...p.filter((x) => x !== "match"), "match"]);
+    let m;
+    try {
+      m = await api.matchFace(eventId, { descriptor });
+    } catch (e) {
+      if (token !== scanToken.current) return;
+      show({ type: "error", message: e.message });
+      beep("error");
+      return;
+    }
+    if (token !== scanToken.current) return;
+    const top = m.candidates[0];
+    if (m.decision === "auto" && top) {
+      decide({ studentId: top.student.id }, "face", top.p);
+    } else if (m.decision === "confirm" && top) {
+      setResult({ type: "confirm", read: "Face scan", candidates: m.candidates, pUnknown: 0 });
+      setPhase("result");
+      beep("attention");
+    } else {
+      setResult({ type: "lowmatch", read: "Face scan", best: top || null, pUnknown: 1 });
+      setPhase("result");
+      beep("error");
+    }
+  };
+
   const matchReadRef = useRef(matchRead);
   matchReadRef.current = matchRead;
+  const matchFaceRef = useRef(matchFaceRead);
+  matchFaceRef.current = matchFaceRead;
   const idleRef = useRef(false);
   idleRef.current = phase === "idle" && !result;
   const [scan, setScan] = useState({ kind: "loading", reads: 0 });
+
+  // Unified continuous scan loop (supports "face", "ocr", or "both")
   useEffect(() => {
     if (!live) return undefined;
     let stopped = false;
@@ -749,64 +785,127 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     let retries = 0;
     let reads = 0;
     let lastFound = Date.now();
-    let recent = [];
+    let recentOcr = [];
+    let recentFace = null;
     setScan({ kind: "loading", reads: 0 });
+
     const tick = async () => {
       if (stopped) return;
       const video = cam.videoRef.current;
-      let wait = 50;
+      let wait = scanMode === "face" ? 180 : 60;
+
       if (!idleRef.current) {
-        // Card may still be in view while a result shows
-        recent = [];
+        recentOcr = [];
+        recentFace = null;
         lastFound = Date.now();
         if (lastCard.current) lastCard.current.seen = Date.now();
+        if (lastFace.current) lastFace.current.seen = Date.now();
       } else if (video && video.readyState >= 2 && !video.paused) {
         const token = scanToken.current;
-        let ocr = null;
-        try {
-          ocr = await readStudentNumber(video, attempt);
-          reads++;
-        } catch (e) {
-          console.error("Student number reader:", e);
-          if (!stopped) setScan({ kind: "error", reads });
-          timer = setTimeout(tick, 5000);
-          return;
-        }
-        if (stopped) return;
         const now = Date.now();
-        const read = ocr ? ocr.read : null;
-        // Stay on settings that just worked for a few reads, otherwise try the next ones
-        if (read) { retries = 4; lastFound = now; }
-        else if (retries > 0) retries--;
-        else attempt++;
-        recent = recent.filter((r) => now - r.at < 30000);
-        const handled = lastCard.current;
-        const sameCardInView = read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000);
-        if (sameCardInView) setScan({ kind: "same", reads });
-        else if (read) setScan({ kind: "found", reads, number: `${read.slice(0, 4)}-${read.slice(4)}` });
-        else if (now - lastFound > 2000) setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
-        else setScan((s) => ({ ...s, reads }));
-        if (read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000)) {
-          // Same card still in view, or a noisy read of it. Only exact reads extend the wait, so the next person with a similar number gets through
-          if (handled.read === read) handled.seen = now;
-        } else if (read && recent.some((r) => r.read === read) && idleRef.current && token === scanToken.current) {
-          // Same number twice
-          recent = [];
-          lastCard.current = { read, seen: now };
-          pendingScan.current = null;
-          setPath(["ocr"]);
-          setPhase("ocr");
-          cam.freeze();
-          matchReadRef.current(ocr.read, ocr.conf, "camera");
-        } else if (read) {
-          recent.push({ read, at: now });
+        let matchedThisTick = false;
+
+        // Step A: Try Face Detection if mode is "face" or "both"
+        if (scanMode === "face" || scanMode === "both") {
+          try {
+            const face = await extractFaceDescriptor(video);
+            reads++;
+            if (stopped) return;
+            if (face) {
+              lastFound = now;
+              const handled = lastFace.current;
+              const samePerson =
+                handled &&
+                handled.descriptor &&
+                euclideanDistance(face.descriptor, handled.descriptor) < 0.45 &&
+                now - handled.seen < 25000;
+
+              if (samePerson) {
+                handled.seen = now;
+                setScan({ kind: "same", reads });
+                matchedThisTick = true;
+              } else if (
+                recentFace &&
+                euclideanDistance(face.descriptor, recentFace) < 0.4 &&
+                idleRef.current &&
+                token === scanToken.current
+              ) {
+                recentFace = null;
+                lastFace.current = { descriptor: face.descriptor, seen: now };
+                setPath(["face"]);
+                setPhase("face");
+                cam.freeze();
+                matchFaceRef.current(face.descriptor);
+                return;
+              } else {
+                recentFace = face.descriptor;
+                setScan({ kind: "found", reads, number: "Face detected" });
+                matchedThisTick = true;
+              }
+            } else {
+              recentFace = null;
+            }
+          } catch (e) {
+            console.error("Face reader:", e);
+            if (scanMode === "face") {
+              if (!stopped) setScan({ kind: "error", reads });
+              timer = setTimeout(tick, 3000);
+              return;
+            }
+          }
+        }
+
+        // Step B: Try Student Number OCR if mode is "ocr" or ("both" and no face found)
+        if (!matchedThisTick && (scanMode === "ocr" || scanMode === "both")) {
+          let ocr = null;
+          try {
+            ocr = await readStudentNumber(video, attempt);
+            reads++;
+          } catch (e) {
+            console.error("Student number reader:", e);
+            if (!stopped) setScan({ kind: "error", reads });
+            timer = setTimeout(tick, 5000);
+            return;
+          }
+          if (stopped) return;
+          const read = ocr ? ocr.read : null;
+          if (read) { retries = 4; lastFound = now; }
+          else if (retries > 0) retries--;
+          else attempt++;
+
+          recentOcr = recentOcr.filter((r) => now - r.at < 30000);
+          const handled = lastCard.current;
+          const sameCardInView = read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000);
+
+          if (sameCardInView) {
+            if (handled.read === read) handled.seen = now;
+            setScan({ kind: "same", reads });
+          } else if (read && recentOcr.some((r) => r.read === read) && idleRef.current && token === scanToken.current) {
+            recentOcr = [];
+            lastCard.current = { read, seen: now };
+            pendingScan.current = null;
+            setPath(["ocr"]);
+            setPhase("ocr");
+            cam.freeze();
+            matchReadRef.current(ocr.read, ocr.conf, "camera");
+            return;
+          } else if (read) {
+            recentOcr.push({ read, at: now });
+            setScan({ kind: "found", reads, number: `${read.slice(0, 4)}-${read.slice(4)}` });
+          }
+        }
+
+        if (!matchedThisTick && now - lastFound > 2000) {
+          setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
+        } else if (!matchedThisTick) {
+          setScan((s) => ({ ...s, reads }));
         }
       }
       timer = setTimeout(tick, wait);
     };
     tick();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [live, scanMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions = actions.search(q);
   const chooseManual = (s) => {
@@ -827,6 +926,12 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     return phase === "result" ? "skipped" : "";
   };
 
+  const firstStep = scanMode === "face"
+    ? ["face", "Face detection"]
+    : scanMode === "ocr"
+    ? ["ocr", "Student number (OCR)"]
+    : [path[0] === "ocr" ? "ocr" : "face", "Face / ID (OCR)"];
+
   return (
     <div className="flex flex-col gap-4">
       {/* Gate header */}
@@ -838,6 +943,23 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
               <span className="text-3xl font-bold">{count}</span>
               <span className="muted">of {capacity} checked in</span>
             </div>
+          </div>
+          {/* Scanner Mode Toggle */}
+          <div className="seg" role="group" aria-label="Scanner mode">
+            {[
+              ["face", "Face"],
+              ["ocr", "ID (OCR)"],
+              ["both", "Both"],
+            ].map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={scanMode === m}
+                onClick={() => { reset(); setScanMode(m); }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -872,30 +994,36 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                 <div className="vf-status">
                   <span className={`dot ${scan.kind === "error" ? "" : "dot-live"}`} style={{ background: scan.kind === "error" ? "var(--warn)" : "var(--ok)" }} />
                   {phase !== "idle" ? "Paused while showing the result"
-                    : scan.kind === "loading" ? "Starting the student number reader"
+                    : scan.kind === "loading" ? `Starting ${scanMode === "face" ? "face" : scanMode === "ocr" ? "ID" : "face & ID"} reader`
                     : scan.kind === "error" ? "Reader error, retrying. Use manual entry for now"
-                    : `Scanning, ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
+                    : `Scanning (${scanMode.toUpperCase()}), ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
                 </div>
-                {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
+                {(phase === "ocr" || phase === "face") && (
+                  <div className="ocr-tag">
+                    {phase === "face" ? "Matching facial features" : "Reading the printed student number"}
+                  </div>
+                )}
                 {phase === "idle" && (
                   <div className="vf-note">
                     {scan.kind === "found" ? `Found ${scan.number}. Hold still, confirming`
-                      : scan.kind === "same" ? "This ID was just scanned. Take it away to scan another"
-                      : scan.kind === "struggling" ? "No student number yet. Move the ID closer, hold it still and avoid glare"
+                      : scan.kind === "same" ? "Already scanned. Step aside to scan the next person"
+                      : scan.kind === "struggling" ? (scanMode === "face" ? "No face detected. Look directly at the camera" : "Move the ID or face closer and avoid glare")
                       : scan.kind === "error" ? "The reader isn't working right now"
-                      : "Show the student ID to the camera"}
+                      : scanMode === "face" ? "Look at the camera to check in"
+                      : scanMode === "ocr" ? "Show the student ID to the camera"
+                      : "Look at the camera or hold up your student ID"}
                   </div>
                 )}
                 {phase === "result" && <div className="vf-note">Frame held</div>}
               </>
             ) : cameraOn && cam.state !== "starting" ? (
               <>
-                {/* No feed */}
+              {/* No feed */}
                 {phase === "idle" && (
                   <CameraStage cam={cam} onRetry={() => { setDeviceId(null); setCameraOn(false); setTimeout(() => setCameraOn(true), 60); }}
                     onUseIllustration={() => setCameraOn(false)} />
                 )}
-                {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
+                {(phase === "ocr" || phase === "face") && <div className="ocr-tag">Matching attendee</div>}
               </>
             ) : (
               <CameraStage cam={cam} onRetry={() => { setCameraOn(true); }} onUseIllustration={() => setCameraOn(false)} />
@@ -907,14 +1035,18 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
         <div className="lg:col-span-2 lg:row-span-2 min-w-0" aria-live="assertive">
           <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} onReset={reset}
             onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
-            onNone={() => { api.logUnresolved(eventId, "ocr", result && result.scanId).then(refresh).catch(() => {}); reset(); focusManual(); }}
+            onNone={() => {
+              if (result && result.scanId) api.logUnresolved(eventId, "ocr", result.scanId).then(refresh).catch(() => {});
+              reset();
+              focusManual();
+            }}
             onManual={() => { reset(); focusManual(); }} />
         </div>
 
         {/* Pipeline + manual entry */}
         <div className="lg:col-span-3 flex flex-col gap-4 min-w-0">
           <ol className="steps" aria-label="Identification steps">
-            {[["ocr", "Student number (OCR)"], ["match", "Bayesian match"], ["result", "Result"]].map(([id, label]) => (
+            {[firstStep, ["match", scanMode === "ocr" ? "Bayesian match" : "Identity match"], ["result", "Result"]].map(([id, label]) => (
               <li key={id} className={`step ${stepState(id)}`}>{label}</li>
             ))}
           </ol>
@@ -947,7 +1079,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
@@ -971,9 +1102,9 @@ function DigitDiff({ id, read }) {
 }
 
 function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm, onNone, onManual }) {
-  if (phase === "ocr" || phase === "checking") {
-    const title = phase === "checking" ? "Checking the guest list" : "Reading student number";
-    const text = phase === "checking" ? "One moment." : "Keep the ID still.";
+  if (phase === "ocr" || phase === "face" || phase === "checking") {
+    const title = phase === "checking" ? "Checking the guest list" : phase === "face" ? "Matching face" : "Reading student number";
+    const text = phase === "checking" ? "One moment." : "Keep still.";
     return (
       <div className="result idle">
         <div className="state"><ScanLine size={24} color="var(--accent)" /> {title}</div>
@@ -1138,7 +1269,7 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
 }
 
 /* ---------------- analytics ---------------- */
-const METHOD_COLOR = { qr: "#3550D4", barcode: "#8C9BF2", ocr: "#C5DE45", confirmed: "#E0861B", manual: "#B5BCD0" };
+const METHOD_COLOR = { qr: "#3550D4", barcode: "#8C9BF2", face: "#1E9A61", ocr: "#C5DE45", confirmed: "#E0861B", manual: "#B5BCD0" };
 
 function Analytics({ data, now, onToast, refresh }) {
   const { students, registered, checkins, log, opens, ends, event } = data;
@@ -1152,7 +1283,7 @@ function Analytics({ data, now, onToast, refresh }) {
       while (times[i] - times[j] >= 10 * 60000) j++;
       if (i - j + 1 > best.count) best = { count: i - j + 1, start: times[j] };
     }
-    const methods = { qr: 0, barcode: 0, ocr: 0, confirmed: 0, manual: 0 };
+    const methods = { qr: 0, barcode: 0, face: 0, ocr: 0, confirmed: 0, manual: 0 };
     for (const c of checkins.values()) methods[c.method] = (methods[c.method] || 0) + 1;
     let running = 0;
     const { buckets } = arrivalBuckets(checkins, now, opens, ends);
