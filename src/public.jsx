@@ -947,7 +947,7 @@ export function TicketPage({ code }) {
               {cancelled ? "This registration was cancelled."
                 : ticket.checkin ? "You're in. Enjoy the event."
                 : ticket.status === "waitlist" ? "You're on the waitlist. You can check in once you're moved to going."
-                : "Show your student ID at the entrance."}
+                : "At the entrance, look at the camera or show your student ID."}
             </p>
           </div>
         </div>

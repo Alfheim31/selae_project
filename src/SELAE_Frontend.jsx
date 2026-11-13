@@ -756,12 +756,11 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       cam.freeze();
       beep("attention");
     } else if (m.decision === "confirm" && top) {
-      setResult({ type: "confirm", read: "Face scan", candidates: m.candidates, pUnknown: 0 });
-      setPhase("result");
+      show({ type: "confirm", face: true, read: "Face scan", candidates: m.candidates, pUnknown: 0 });
       beep("attention");
     } else {
-      setResult({ type: "lowmatch", read: "Face scan", best: top || null, pUnknown: 1 });
-      setPhase("result");
+      show({ type: "lowmatch", face: true, read: "Face scan", best: top || null, pUnknown: 1 });
+      api.logUnresolved(eventId, "face").then(refresh).catch(() => {});
       beep("error");
     }
   };
@@ -1062,8 +1061,8 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                  <button className="btn btn-primary" onClick={() => decide({ studentId: pendingFaceMatch.studentId }, "face", pendingFaceMatch.p, { scanId: pendingFaceMatch.scanId })} autoFocus>
                    Confirm Check-in
                  </button>
-                 <button className="btn btn-on" onClick={() => reset(true)}>
-                   Cancel & Retry
+                 <button className="btn btn-on" onClick={() => { api.logUnresolved(eventId, "face").then(refresh).catch(() => {}); reset(true); }}>
+                   Not them, retry
                  </button>
                </div>
              </div>
@@ -1071,7 +1070,8 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
             <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} onReset={() => reset(true)} scanMode={scanMode}
               onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
               onNone={() => {
-                if (result && result.scanId) api.logUnresolved(eventId, "ocr", result.scanId).then(refresh).catch(() => {});
+                if (result && result.face) api.logUnresolved(eventId, "face").then(refresh).catch(() => {});
+                else if (result && result.scanId) api.logUnresolved(eventId, "ocr", result.scanId).then(refresh).catch(() => {});
                 reset();
                 focusManual();
               }}
@@ -1151,10 +1151,10 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
   
   if (!result) {
     const liveText = scanMode === "face"
-      ? "Camera is live. Ask the attendee to look directly at the camera. It checks in by itself once their face is recognized. If nothing happens, use manual entry."
+      ? "Camera is live. Ask the attendee to look directly at the camera. When a face is recognized, check the name shown and confirm. If nothing happens, use manual entry."
       : scanMode === "ocr"
       ? "Camera is live. Ask the attendee to hold their student ID up to the camera, close and steady. It checks in by itself as soon as it reads the student number. If nothing happens, use manual entry."
-      : "Camera is live. Ask the attendee to look at the camera or hold up their student ID. It checks in by itself once recognized. If nothing happens, use manual entry.";
+      : "Camera is live. Ask the attendee to look at the camera or hold up their student ID. ID reads check in by themselves; face matches ask you to confirm the name. If nothing happens, use manual entry.";
 
     const pausedText = scanMode === "face" 
       ? "Ask the attendee to look at the camera." 
@@ -1254,13 +1254,15 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
       return (
         <div className="result warn">
           <div className="state"><AlertTriangle size={28} /> Confirm this attendee</div>
-          <p className="text-lg">SELAE read <strong>{result.read}</strong> but isn't sure enough to decide alone. Check the ID and choose the matching student.</p>
+          <p className="text-lg">{result.face
+            ? "This face looks like someone on file, but not closely enough to decide alone. Compare the face with the names below, or check their student ID."
+            : <>SELAE read <strong>{result.read}</strong> but isn't sure enough to decide alone. Check the ID and choose the matching student.</>}</p>
           <div className="flex flex-col gap-2">
             {result.candidates.filter((c) => c.p >= 0.01).map((c, i) => (
               <button key={c.student.id} className="cand" onClick={() => onConfirm(c)} autoFocus={i === 0}>
                 <span>
                   <span className="font-bold text-lg block">{formatName(c.student)}</span>
-                  <span><DigitDiff id={c.student.id} read={result.read} />{c.student.section ? `, ${c.student.section}` : ""}</span>
+                  <span>{result.face ? <span className="mono">{c.student.id}</span> : <DigitDiff id={c.student.id} read={result.read} />}{c.student.section ? `, ${c.student.section}` : ""}</span>
                   {c.status !== "going" && <span className="block text-sm font-bold">{STATUS_NOTE[c.status]}</span>}
                 </span>
                 <span className="font-bold">{pct(c.p)}</span>
@@ -1276,9 +1278,19 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
         <div className="result warn">
           <div className="state"><HelpCircle size={28} /> No confident match</div>
           <p className="text-lg">
-            SELAE read <strong>{result.read}</strong> but couldn't match it to anyone with confidence
-            {result.best ? <> (closest: {formatName(result.best.student)}, {pct(result.best.p)})</> : null}.
-            Check the ID and type the student number or name. Your answer teaches SELAE how this camera misreads digits.
+            {result.face ? (
+              <>
+                This face doesn't closely match anyone on file.
+                They may not have registered, or the lighting or angle is off. Check their student ID and type the number or name.
+              </>
+            ) : (
+              <>
+                SELAE read <strong>{result.read}</strong> but couldn't match it to anyone with confidence
+                {result.best ? <> (closest: {formatName(result.best.student)}, {pct(result.best.p)})</> : null}.
+                Check the ID and type the student number or name. Your answer teaches SELAE how this camera misreads digits.
+              </>
+            )}
+
           </p>
           <div className="flex flex-col gap-2 mt-auto">
             <button className="btn btn-on" onClick={onManual} autoFocus><Keyboard size={16} /> Go to manual entry</button>

@@ -635,7 +635,7 @@ export function createApi(store) {
       if (b.outcome !== "unresolved") fail(400, "Only unreadable scans can be logged directly.");
       store.mutate((d) => {
         d.logs.push({ uid: newId(), eventId: id, time: new Date().toISOString(), studentId: null, outcome: "unresolved",
-          method: ["qr", "barcode", "ocr"].includes(b.method) ? b.method : "ocr" });
+          method: ["qr", "barcode", "ocr", "face"].includes(b.method) ? b.method : "ocr" });
         const scan = b.scanId && (d.ocrScans || []).find((s) => s.id === b.scanId && s.eventId === id);
         if (scan && !scan.resolution) scan.resolution = "none";
       });
