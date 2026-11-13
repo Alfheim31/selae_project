@@ -14,6 +14,7 @@ import {
 } from "../components/shared.jsx";
 import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "../components/forecast.jsx";
 import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox, SUFFIXES } from "./public.jsx";
+import { extractFaceDescriptor, euclideanDistance } from "../lib/face.js";
 
 /* SELAE — Smart Event Logistics and Analytics Engine */
 
@@ -443,7 +444,7 @@ const chartTip = { background: "#FFFFFF", border: "1px solid #DCE2EE", borderRad
 
 function MethodChip({ method, confidence }) {
   if (!method) return null;
-  const conf = (method === "ocr" || method === "confirmed") && confidence != null ? ` ${pct(confidence)}` : "";
+  const conf = (method === "ocr" || method === "face" || method === "confirmed") && confidence != null ? ` ${pct(confidence)}` : "";
   return <span className={`chip ${method}`} title={METHOD_LABEL[method]}>{METHOD_SHORT[method]}{conf}</span>;
 }
 
@@ -640,6 +641,7 @@ function makeActions(data) {
 function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const { checkins, capacity, event } = data;
   const actions = useMemo(() => makeActions(data), [data]);
+  const [scanMode, setScanMode] = useState("face"); // "face" | "ocr" | "both"
   const [phase, setPhase] = useState("idle");
   const [result, setResult] = useState(null);
   const [cameraOn, setCameraOn] = useState(true);
@@ -656,19 +658,13 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const scanToken = useRef(0);
   const pendingScan = useRef(null);
   const lastCard = useRef(null);
+  const lastFace = useRef(null);
   const beep = useBeep(sound);
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
   const later = (fn, ms) => timers.current.push(setTimeout(fn, ms));
   useEffect(() => clearTimers, []);
   const focusManual = () => setTimeout(() => inputRef.current && inputRef.current.focus(), 50);
-
-  const reset = () => {
-    clearTimers();
-    scanToken.current++;
-    setPhase("idle"); setResult(null); setPath([]);
-    cam.resume();
-  };
 
   const show = (r) => { setResult(r); setPath((p) => [...p, "result"]); setPhase("result"); cam.freeze(); };
 
@@ -696,7 +692,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     if (res.outcome === "approved") {
       show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(res.learned), added: Boolean(res.added) });
       beep("ok");
-      later(reset, 3500);
+      later(() => reset(false), 3500);
     } else if (res.outcome === "unresolved") {
       show({ type: "unknown", read: target.ticket || target.studentId });
       beep("error");
@@ -707,7 +703,7 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       show({ type: res.outcome, student, method, otherEvent: res.otherEvent,
         previous: res.previous ? { ...res.previous, time: new Date(res.previous.time) } : null });
       beep(res.outcome === "dup" ? "attention" : "error");
-      if (res.outcome === "dup") later(reset, 5000);
+      if (res.outcome === "dup") later(() => reset(false), 5000);
     }
   };
 
@@ -740,6 +736,38 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       beep("attention");
     }
   };
+  
+
+
+  // Face Match handler
+  const matchFaceRead = async (descriptor) => {
+    const token = scanToken.current;
+    setPath((p) => [...p.filter((x) => x !== "match"), "match"]);
+    let m;
+    try {
+      m = await api.matchFace(eventId, { descriptor });
+    } catch (e) {
+      if (token !== scanToken.current) return;
+      show({ type: "error", message: e.message });
+      beep("error");
+      return;
+    }
+    if (token !== scanToken.current) return;
+    const top = m.candidates[0];
+    if (m.decision === "auto" && top) {
+      setPendingFaceMatch({ studentId: top.student.id, p: top.p, scanId: m.scanId, student: top.student });
+      setPhase("confirm-face");
+      cam.freeze();
+      beep("attention");
+    } else if (m.decision === "confirm" && top) {
+      show({ type: "confirm", face: true, read: "Face scan", candidates: m.candidates, pUnknown: 0 });
+      beep("attention");
+    } else {
+      show({ type: "lowmatch", face: true, read: "Face scan", best: top || null, pUnknown: 1 });
+      api.logUnresolved(eventId, "face").then(refresh).catch(() => {});
+      beep("error");
+    }
+  };
 
   // Student missing from the list
   const addStudent = async (fields) => {
@@ -760,12 +788,33 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       initial: /\d/.test(typed) ? { studentId: typed } : { last: typed } });
   };
 
-  // Continuous student number scan
   const matchReadRef = useRef(matchRead);
   matchReadRef.current = matchRead;
+  const matchFaceRef = useRef(matchFaceRead);
+  matchFaceRef.current = matchFaceRead;
   const idleRef = useRef(false);
   idleRef.current = phase === "idle" && !result;
+  const [pendingFaceMatch, setPendingFaceMatch] = useState(null);
   const [scan, setScan] = useState({ kind: "loading", reads: 0 });
+  const [loopKey, setLoopKey] = useState(0);
+
+  const reset = (clearCooldown = true) => {
+    clearTimers();
+    scanToken.current++;
+    setPhase("idle");
+    setResult(null);
+    setPath([]);
+    setPendingFaceMatch(null);
+    setScan((s) => ({ kind: "scanning", reads: s.reads || 0 }));
+    if (clearCooldown) {
+      lastFace.current = null;
+      lastCard.current = null;
+    }
+    cam.resume();
+    setLoopKey((k) => k + 1);
+  };
+
+  // Unified continuous scan loop (supports "face", "ocr", or "both")
   useEffect(() => {
     if (!live) return undefined;
     let stopped = false;
@@ -774,64 +823,131 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     let retries = 0;
     let reads = 0;
     let lastFound = Date.now();
-    let recent = [];
+    let recentOcr = [];
+    let recentFace = null;
     setScan({ kind: "loading", reads: 0 });
+
     const tick = async () => {
       if (stopped) return;
       const video = cam.videoRef.current;
-      let wait = 50;
+      let wait = scanMode === "face" ? 180 : 60;
+
       if (!idleRef.current) {
-        // Card may still be in view while a result shows
-        recent = [];
+        recentOcr = [];
+        recentFace = null;
         lastFound = Date.now();
         if (lastCard.current) lastCard.current.seen = Date.now();
+        if (lastFace.current) lastFace.current.seen = Date.now();
       } else if (video && video.readyState >= 2 && !video.paused) {
         const token = scanToken.current;
-        let ocr = null;
-        try {
-          ocr = await readStudentNumber(video, attempt);
-          reads++;
-        } catch (e) {
-          console.error("Student number reader:", e);
-          if (!stopped) setScan({ kind: "error", reads });
-          timer = setTimeout(tick, 5000);
-          return;
-        }
-        if (stopped) return;
         const now = Date.now();
-        const read = ocr ? ocr.read : null;
-        // Stay on settings that just worked for a few reads, otherwise try the next ones
-        if (read) { retries = 4; lastFound = now; }
-        else if (retries > 0) retries--;
-        else attempt++;
-        recent = recent.filter((r) => now - r.at < 30000);
-        const handled = lastCard.current;
-        const sameCardInView = read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000);
-        if (sameCardInView) setScan({ kind: "same", reads });
-        else if (read) setScan({ kind: "found", reads, number: `${read.slice(0, 4)}-${read.slice(4)}` });
-        else if (now - lastFound > 2000) setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
-        else setScan((s) => ({ ...s, reads }));
-        if (read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000)) {
-          // Same card still in view, or a noisy read of it. Only exact reads extend the wait, so the next person with a similar number gets through
-          if (handled.read === read) handled.seen = now;
-        } else if (read && recent.some((r) => r.read === read) && idleRef.current && token === scanToken.current) {
-          // Same number twice
-          recent = [];
-          lastCard.current = { read, seen: now };
-          pendingScan.current = null;
-          setPath(["ocr"]);
-          setPhase("ocr");
-          cam.freeze();
-          matchReadRef.current(ocr.read, ocr.conf, "camera");
-        } else if (read) {
-          recent.push({ read, at: now });
+        let matchedThisTick = false;
+
+        // Step A: Try Face Detection if mode is "face" or "both"
+        if (scanMode === "face" || scanMode === "both") {
+          try {
+            const face = await extractFaceDescriptor(video);
+            reads++;
+            if (stopped) return;
+            if (face) {
+              lastFound = now;
+              const handled = lastFace.current;
+              const globalCooldown = handled && now - handled.seen < 800;
+              const samePerson =
+                handled &&
+                handled.descriptor &&
+                euclideanDistance(face.descriptor, handled.descriptor) < 0.45 &&
+                now - handled.seen < 3000;
+
+              if (globalCooldown || samePerson) {
+                if (samePerson) handled.seen = now;
+                setScan({ kind: "same", reads });
+                matchedThisTick = true;
+              } else if (
+                recentFace &&
+                euclideanDistance(face.descriptor, recentFace) < 0.48 &&
+                idleRef.current &&
+                token === scanToken.current
+              ) {
+                recentFace = null;
+                lastFace.current = { descriptor: face.descriptor, seen: now };
+                setPath(["face"]);
+                setPhase("face");
+                cam.freeze();
+                matchFaceRef.current(face.descriptor);
+                timer = setTimeout(tick, wait);
+                return;
+              } else {
+                recentFace = face.descriptor;
+                setScan({ kind: "found", reads, number: "Face detected" });
+                matchedThisTick = true;
+              }
+            } else {
+              recentFace = null;
+            }
+          } catch (e) {
+            console.error("Face reader:", e);
+            if (scanMode === "face") {
+              if (!stopped) setScan({ kind: "error", reads });
+              timer = setTimeout(tick, 3000);
+              return;
+            }
+          }
+        }
+
+        // Step B: Try Student Number OCR if mode is "ocr" or ("both" and no face found)
+        if (!matchedThisTick && (scanMode === "ocr" || scanMode === "both")) {
+          let ocr = null;
+          try {
+            ocr = await readStudentNumber(video, attempt);
+            reads++;
+          } catch (e) {
+            console.error("Student number reader:", e);
+            if (!stopped) setScan({ kind: "error", reads });
+            timer = setTimeout(tick, 5000);
+            return;
+          }
+          if (stopped) return;
+          const read = ocr ? ocr.read : null;
+          if (read) { retries = 4; lastFound = now; }
+          else if (retries > 0) retries--;
+          else attempt++;
+
+          recentOcr = recentOcr.filter((r) => now - r.at < 30000);
+          const handled = lastCard.current;
+          const sameCardInView = read && handled && (handled.read === read ? now - handled.seen < 60000 : digitsApart(read, handled.read) <= 2 && now - handled.seen < 20000);
+
+          if (sameCardInView) {
+            if (handled.read === read) handled.seen = now;
+            setScan({ kind: "same", reads });
+          } else if (read && recentOcr.some((r) => r.read === read) && idleRef.current && token === scanToken.current) {
+            recentOcr = [];
+            lastCard.current = { read, seen: now };
+            pendingScan.current = null;
+            setPath(["ocr"]);
+            setPhase("ocr");
+            cam.freeze();
+            matchReadRef.current(ocr.read, ocr.conf, "camera");
+            timer = setTimeout(tick, wait);
+            return;
+          } else if (read) {
+            recentOcr.push({ read, at: now });
+            setScan({ kind: "found", reads, number: `${read.slice(0, 4)}-${read.slice(4)}` });
+          }
+        }
+
+        if (!matchedThisTick && now - lastFound > 2000) {
+          setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
+        } else if (!matchedThisTick) {
+          setScan({ kind: "scanning", reads });
         }
       }
       timer = setTimeout(tick, wait);
     };
-    tick();
+    const START_DELAY = loopKey > 0 ? 1500 : 0;
+    timer = setTimeout(tick, START_DELAY);
     return () => { stopped = true; clearTimeout(timer); };
-  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [live, scanMode, loopKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions = actions.search(q);
   const chooseManual = (s) => {
@@ -852,6 +968,12 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     return phase === "result" ? "skipped" : "";
   };
 
+  const firstStep = scanMode === "face"
+    ? ["face", "Face detection"]
+    : scanMode === "ocr"
+    ? ["ocr", "Student number (OCR)"]
+    : [path[0] === "ocr" ? "ocr" : "face", "Face / ID (OCR)"];
+
   return (
     <div className="flex flex-col gap-4">
       {/* Gate header */}
@@ -863,6 +985,23 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
               <span className="text-3xl font-bold">{count}</span>
               <span className="muted">of {capacity} checked in</span>
             </div>
+          </div>
+          {/* Scanner Mode Toggle */}
+          <div className="seg" role="group" aria-label="Scanner mode">
+            {[
+              ["face", "Face"],
+              ["ocr", "ID (OCR)"],
+              ["both", "Both"],
+            ].map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={scanMode === m}
+                onClick={() => { reset(); setScanMode(m); }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -897,30 +1036,36 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                 <div className="vf-status">
                   <span className={`dot ${scan.kind === "error" ? "" : "dot-live"}`} style={{ background: scan.kind === "error" ? "var(--warn)" : "var(--ok)" }} />
                   {phase !== "idle" ? "Paused while showing the result"
-                    : scan.kind === "loading" ? "Starting the student number reader"
+                    : scan.kind === "loading" ? `Starting ${scanMode === "face" ? "face" : scanMode === "ocr" ? "ID" : "face & ID"} reader`
                     : scan.kind === "error" ? "Reader error, retrying. Use manual entry for now"
-                    : `Scanning, ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
+                    : `Scanning (${scanMode.toUpperCase()}), ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
                 </div>
-                {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
+                {(phase === "ocr" || phase === "face") && (
+                  <div className="ocr-tag">
+                    {phase === "face" ? "Matching facial features" : "Reading the printed student number"}
+                  </div>
+                )}
                 {phase === "idle" && (
                   <div className="vf-note">
                     {scan.kind === "found" ? `Found ${scan.number}. Hold still, confirming`
-                      : scan.kind === "same" ? "This ID was just scanned. Take it away to scan another"
-                      : scan.kind === "struggling" ? "No student number yet. Move the ID closer, hold it still and avoid glare"
+                      : scan.kind === "same" ? "Already scanned. Step aside to scan the next person"
+                      : scan.kind === "struggling" ? (scanMode === "face" ? "No face detected. Look directly at the camera" : "Move the ID or face closer and avoid glare")
                       : scan.kind === "error" ? "The reader isn't working right now"
-                      : "Show the student ID to the camera"}
+                      : scanMode === "face" ? "Look at the camera to check in"
+                      : scanMode === "ocr" ? "Show the student ID to the camera"
+                      : "Look at the camera or hold up your student ID"}
                   </div>
                 )}
                 {phase === "result" && <div className="vf-note">Frame held</div>}
               </>
             ) : cameraOn && cam.state !== "starting" ? (
               <>
-                {/* No feed */}
+              {/* No feed */}
                 {phase === "idle" && (
                   <CameraStage cam={cam} onRetry={() => { setDeviceId(null); setCameraOn(false); setTimeout(() => setCameraOn(true), 60); }}
                     onUseIllustration={() => setCameraOn(false)} />
                 )}
-                {phase === "ocr" && <div className="ocr-tag">Reading the printed student number</div>}
+                {(phase === "ocr" || phase === "face") && <div className="ocr-tag">Matching attendee</div>}
               </>
             ) : (
               <CameraStage cam={cam} onRetry={() => { setCameraOn(true); }} onUseIllustration={() => setCameraOn(false)} />
@@ -930,23 +1075,45 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
 
         {/* Result panel */}
         <div className="lg:col-span-2 lg:row-span-2 min-w-0" aria-live="assertive">
-          <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} data={data} onAdd={addStudent}
-            onReset={() => { pendingScan.current = null; reset(); }}
-            onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
-            onNone={() => {
-              api.logUnresolved(eventId, "ocr", result && result.scanId).then(refresh).catch(() => {});
-              setResult({ type: "add", title: "Student not on the list", initial: { studentId: result.read },
-                message: `None of the matches were right for ${result.read}. Check the number against the ID, then add the student.` });
-            }}
-            onOpenAdd={() => setResult({ type: "add", title: "Add student", initial: { studentId: result.number },
-              message: "Check the number against the ID, then fill in the rest." })}
-            onManual={() => { reset(); focusManual(); }} />
+          {phase === "confirm-face" && pendingFaceMatch ? (
+             <div className="result warn">
+               <div className="state"><CheckCircle2 size={28} /> Confirm Attendee</div>
+               <p className="text-lg">Face matched: <strong>{formatName(pendingFaceMatch.student)}</strong></p>
+               <p className="muted">Is this the correct student?</p>
+               <div className="flex flex-col gap-2 mt-auto">
+                 <button className="btn btn-primary" onClick={() => decide({ studentId: pendingFaceMatch.studentId }, "face", pendingFaceMatch.p, { scanId: pendingFaceMatch.scanId })} autoFocus>
+                   Confirm Check-in
+                 </button>
+                 <button className="btn btn-on" onClick={() => { api.logUnresolved(eventId, "face").then(refresh).catch(() => {}); reset(true); }}>
+                   Not them, retry
+                 </button>
+               </div>
+             </div>
+          ) : (
+            <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} data={data} onAdd={addStudent} scanMode={scanMode}
+              onReset={() => { pendingScan.current = null; reset(true); }}
+              onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
+              onNone={() => {
+                if (result && result.face) {
+                  api.logUnresolved(eventId, "face").then(refresh).catch(() => {});
+                  reset();
+                  focusManual();
+                  return;
+                }
+                api.logUnresolved(eventId, "ocr", result && result.scanId).then(refresh).catch(() => {});
+                setResult({ type: "add", title: "Student not on the list", initial: { studentId: result.read },
+                  message: `None of the matches were right for ${result.read}. Check the number against the ID, then add the student.` });
+              }}
+              onOpenAdd={() => setResult({ type: "add", title: "Add student", initial: { studentId: result.number },
+                message: "Check the number against the ID, then fill in the rest." })}
+              onManual={() => { reset(); focusManual(); }} />
+          )}
         </div>
 
         {/* Pipeline + manual entry */}
         <div className="lg:col-span-3 flex flex-col gap-4 min-w-0">
           <ol className="steps" aria-label="Identification steps">
-            {[["ocr", "Student number (OCR)"], ["match", "Bayesian match"], ["result", "Result"]].map(([id, label]) => (
+            {[firstStep, ["match", scanMode === "ocr" ? "Bayesian match" : "Identity match"], ["result", "Result"]].map(([id, label]) => (
               <li key={id} className={`step ${stepState(id)}`}>{label}</li>
             ))}
           </ol>
@@ -987,7 +1154,6 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
@@ -1071,10 +1237,10 @@ function AddStudentForm({ result, data, onAdd, onManual, onReset }) {
   );
 }
 
-function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpenAdd, onReset, onConfirm, onNone, onManual }) {
-  if (phase === "ocr" || phase === "checking") {
-    const title = phase === "checking" ? "Checking the guest list" : "Reading student number";
-    const text = phase === "checking" ? "One moment." : "Keep the ID still.";
+function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpenAdd, onReset, onConfirm, onNone, onManual, scanMode }) {
+  if (phase === "ocr" || phase === "face" || phase === "checking") {
+    const title = phase === "checking" ? "Checking the guest list" : phase === "face" ? "Matching face" : "Reading student number";
+    const text = phase === "checking" ? "One moment." : phase === "face" ? "Keep still." : "Keep the ID still.";
     return (
       <div className="result idle">
         <div className="state"><ScanLine size={24} color="var(--accent)" /> {title}</div>
@@ -1082,14 +1248,25 @@ function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpe
       </div>
     );
   }
+  
   if (!result) {
+    const liveText = scanMode === "face"
+      ? "Camera is live. Ask the attendee to look directly at the camera. When a face is recognized, check the name shown and confirm. If nothing happens, use manual entry."
+      : scanMode === "ocr"
+      ? "Camera is live. Ask the attendee to hold their student ID up to the camera, close and steady. It checks in by itself as soon as it reads the student number. If nothing happens, use manual entry."
+      : "Camera is live. Ask the attendee to look at the camera or hold up their student ID. ID reads check in by themselves; face matches ask you to confirm the name. If nothing happens, use manual entry.";
+
+    const pausedText = scanMode === "face" 
+      ? "Ask the attendee to look at the camera." 
+      : scanMode === "ocr" 
+      ? "Ask the attendee to hold their student ID up to the camera." 
+      : "Ask the attendee to look at the camera or hold up their ID.";
+
     return (
       <div className="result idle">
         <div className="state">{camera ? <ScanLine size={24} color="var(--accent)" /> : <AlertTriangle size={24} color="var(--warn)" />} {camera ? "Ready for the next attendee" : "Scanning paused"}</div>
         <p className="muted text-lg">{camera
-          ? (live
-            ? "Camera is live. Ask the attendee to hold their student ID up to the camera, close and steady. It checks in by itself as soon as it reads the student number. If nothing happens, use manual entry."
-            : "Ask the attendee to hold their student ID up to the camera.")
+          ? (live ? liveText : pausedText)
           : "The camera is off. Use manual entry to keep checking attendees in."}</p>
       </div>
     );
@@ -1112,6 +1289,7 @@ function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpe
           <p className="font-bold">
             {result.method === "qr" && "Identified by QR ticket"}
             {result.method === "barcode" && "Identified by ID barcode"}
+            {result.method === "face" && `Identified by Face Scan, ${sure(result.confidence)} match`}
             {result.method === "ocr" && `Identified by OCR, ${sure(result.confidence)} sure`}
             {result.method === "confirmed" && `Confirmed by operator (SELAE gave ${pct(result.confidence)})`}
             {result.method === "manual" && "Entered manually"}
@@ -1183,13 +1361,15 @@ function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpe
       return (
         <div className="result warn">
           <div className="state"><AlertTriangle size={28} /> Confirm this attendee</div>
-          <p className="text-lg">SELAE read <strong>{result.read}</strong> but isn't sure enough to decide alone. Check the ID and choose the matching student.</p>
+          <p className="text-lg">{result.face
+            ? "This face looks like someone on file, but not closely enough to decide alone. Compare the face with the names below, or check their student ID."
+            : <>SELAE read <strong>{result.read}</strong> but isn't sure enough to decide alone. Check the ID and choose the matching student.</>}</p>
           <div className="flex flex-col gap-2">
             {result.candidates.filter((c) => c.p >= 0.01).map((c, i) => (
               <button key={c.student.id} className="cand" onClick={() => onConfirm(c)} autoFocus={i === 0}>
                 <span>
                   <span className="font-bold text-lg block">{formatName(c.student)}</span>
-                  <span><DigitDiff id={c.student.id} read={result.read} />{c.student.section ? `, ${c.student.section}` : ""}</span>
+                  <span>{result.face ? <span className="mono">{c.student.id}</span> : <DigitDiff id={c.student.id} read={result.read} />}{c.student.section ? `, ${c.student.section}` : ""}</span>
                   {c.status !== "going" && <span className="block text-sm font-bold">{STATUS_NOTE[c.status]}</span>}
                 </span>
                 <span className="font-bold">{pct(c.p)}</span>
@@ -1197,7 +1377,32 @@ function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpe
             ))}
           </div>
           {result.pUnknown >= 0.01 && <p className="text-sm">{pct(result.pUnknown)} chance it's someone not on file. Underlined digits differ from what was read.</p>}
-          <button className="btn btn-on mt-auto" onClick={onNone}>None of these, add student</button>
+          <button className="btn btn-on mt-auto" onClick={onNone}>{result.face ? "None of these, type it instead" : "None of these, add student"}</button>
+        </div>
+      );
+    case "lowmatch":
+      return (
+        <div className="result warn">
+          <div className="state"><HelpCircle size={28} /> No confident match</div>
+          <p className="text-lg">
+            {result.face ? (
+              <>
+                This face doesn't closely match anyone on file.
+                They may not have registered, or the lighting or angle is off. Check their student ID and type the number or name.
+              </>
+            ) : (
+              <>
+                SELAE read <strong>{result.read}</strong> but couldn't match it to anyone with confidence
+                {result.best ? <> (closest: {formatName(result.best.student)}, {pct(result.best.p)})</> : null}.
+                Check the ID and type the student number or name. Your answer teaches SELAE how this camera misreads digits.
+              </>
+            )}
+
+          </p>
+          <div className="flex flex-col gap-2 mt-auto">
+            <button className="btn btn-on" onClick={onManual} autoFocus><Keyboard size={16} /> Go to manual entry</button>
+            <button className="btn btn-on" onClick={onReset}>Next attendee</button>
+          </div>
         </div>
       );
     case "unknown":
@@ -1231,7 +1436,7 @@ function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpe
 }
 
 /* ---------------- analytics ---------------- */
-const METHOD_COLOR = { qr: "#3550D4", barcode: "#8C9BF2", ocr: "#C5DE45", confirmed: "#E0861B", manual: "#B5BCD0" };
+const METHOD_COLOR = { qr: "#3550D4", barcode: "#8C9BF2", face: "#1E9A61", ocr: "#C5DE45", confirmed: "#E0861B", manual: "#B5BCD0" };
 
 function Analytics({ data, now, onToast, refresh }) {
   const { students, registered, checkins, log, opens, ends, event } = data;
@@ -1245,7 +1450,7 @@ function Analytics({ data, now, onToast, refresh }) {
       while (times[i] - times[j] >= 10 * 60000) j++;
       if (i - j + 1 > best.count) best = { count: i - j + 1, start: times[j] };
     }
-    const methods = { qr: 0, barcode: 0, ocr: 0, confirmed: 0, manual: 0 };
+    const methods = { qr: 0, barcode: 0, face: 0, ocr: 0, confirmed: 0, manual: 0 };
     for (const c of checkins.values()) methods[c.method] = (methods[c.method] || 0) + 1;
     let running = 0;
     const { buckets } = arrivalBuckets(checkins, now, opens, ends);

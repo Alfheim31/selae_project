@@ -63,9 +63,20 @@ function publicEvent(data, req, e) {
     counts: c, spotsLeft: Math.max(0, e.capacity - c.going), isPast,
     registrationOpen: e.registrationOpen && !isPast, canManage: canManage(req, e) };
 }
+// Face data stays on the server
+function noFace(s) {
+  if (!s || !("faceDescriptor" in s)) return s;
+  const { faceDescriptor, ...rest } = s;
+  return rest;
+}
+function regView(r) {
+  const { faceDescriptor, ...rest } = r;
+  return { ...rest, student: noFace(rest.student) };
+}
+
 function ticketView(data, req, reg) {
   const event = data.events.find((e) => e.id === reg.eventId);
-  const student = reg.student || data.directory[reg.studentId];
+  const student = noFace(reg.student || data.directory[reg.studentId]);
   return {
     code: reg.code, status: reg.status, createdAt: reg.createdAt, checkin: reg.checkin,
     student, event: event ? publicEvent(data, req, event) : null,
@@ -131,7 +142,7 @@ function addRegistration(d, event, student, extra = {}) {
 /* ---------- check-in rules ---------- */
 function checkIn(data, event, body, canLearn) {
   const now = new Date().toISOString();
-  const method = ["qr", "barcode", "ocr", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
+  const method = ["qr", "barcode", "ocr", "face", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
   const confidence = typeof body.confidence === "number" ? Math.max(0, Math.min(1, body.confidence)) : null;
   const log = (outcome, studentId, extra = {}) =>
     data.logs.push({ uid: newId(), eventId: event.id, time: now, studentId: studentId || null, outcome, method, ...extra });
@@ -145,7 +156,7 @@ function checkIn(data, event, body, canLearn) {
     if (found.eventId !== event.id) {
       const other = data.events.find((e) => e.id === found.eventId);
       log("wrongevent", found.studentId);
-      return { outcome: "wrongevent", time: now, student: data.directory[found.studentId], otherEvent: other ? { id: other.id, title: other.title, startsAt: other.startsAt } : null };
+      return { outcome: "wrongevent", time: now, student: noFace(data.directory[found.studentId]), otherEvent: other ? { id: other.id, title: other.title, startsAt: other.startsAt } : null };
     }
     reg = found;
     studentId = found.studentId;
@@ -158,7 +169,7 @@ function checkIn(data, event, body, canLearn) {
 
   const learned = resolveScan(data, event, body, method, studentId, canLearn);
 
-  const student = data.directory[studentId] || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
+  const student = noFace(data.directory[studentId]) || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
   if (!reg || reg.status === "cancelled") { log("notreg", studentId); return { outcome: "notreg", time: now, student }; }
   if (reg.status === "waitlist") { log("waitlist", studentId); return { outcome: "waitlist", time: now, student }; }
   if (reg.checkin) { log("dup", studentId); return { outcome: "dup", time: now, student, previous: reg.checkin }; }
@@ -203,7 +214,71 @@ function matchRead(data, event, body) {
   return {
     scanId: scan.id, read: pretty(read), decision: out.decision, pUnknown: out.pUnknown, thresholds: out.thresholds,
     candidates: out.candidates.map((c) => ({ p: c.p, status: statusOf(c.reg),
-      student: data.directory[c.id] || { id: c.id, last: "", first: "", middle: "", suffix: "", section: "" } })),
+      student: noFace(data.directory[c.id]) || { id: c.id, last: "", first: "", middle: "", suffix: "", section: "" } })),
+  };
+}
+
+// Euclidean distance matching helper
+function euclideanDistance(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== 128 || b.length !== 128) return Infinity;
+  let sum = 0;
+  for (let i = 0; i < 128; i++) {
+    const d = a[i] - b[i];
+    sum += d * d;
+  }
+  return Math.sqrt(sum);
+}
+
+const FACE_AUTO_THRESHOLD = 0.48;
+const FACE_CONFIRM_THRESHOLD = 0.58;
+
+function matchFace(data, event, body) {
+  const desc = body.descriptor;
+  if (!Array.isArray(desc) || desc.length !== 128 || !desc.every((n) => typeof n === "number" && Number.isFinite(n))) {
+    fail(400, "Send a valid 128-float face descriptor.");
+  }
+
+  const regs = new Map();
+  for (const r of data.registrations) {
+    if (r.eventId === event.id && r.status !== "cancelled") regs.set(r.studentId, r);
+  }
+
+  const scored = [];
+  for (const s of Object.values(data.directory)) {
+    const reg = regs.get(s.id) || null;
+    const targetDesc = (reg && reg.faceDescriptor) || s.faceDescriptor;
+    if (!targetDesc) continue;
+
+    const dist = euclideanDistance(desc, targetDesc);
+    // Convert distance [0, 1.0+] into a confidence score [0, 1]
+    const p = Math.max(0, Math.min(1, 1 - dist / 1.0));
+    scored.push({
+      id: s.id,
+      dist,
+      p,
+      status: statusOf(reg),
+      student: s,
+    });
+  }
+
+  scored.sort((a, b) => a.dist - b.dist);
+  const candidates = scored.slice(0, 3);
+  const top = candidates[0] || null;
+
+  let decision = "reject";
+  if (top) {
+    if (top.dist <= FACE_AUTO_THRESHOLD) decision = "auto";
+    else if (top.dist <= FACE_CONFIRM_THRESHOLD) decision = "confirm";
+  }
+
+  return {
+    decision,
+    candidates: candidates.map((c) => ({
+      p: c.p,
+      dist: Math.round(c.dist * 1000) / 1000,
+      status: c.status,
+      student: noFace(c.student),
+    })),
   };
 }
 
@@ -489,7 +564,15 @@ export function createApi(store) {
       const studentId = student.id;
       const email = str(b.email, "Email", { max: 120, required: false });
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
-
+      // Validates faceDescriptor if provided, but allows null for OCR-only use.
+      let faceDescriptor = null;
+      if (b.faceDescriptor !== undefined && b.faceDescriptor !== null) {
+        if (!Array.isArray(b.faceDescriptor) || b.faceDescriptor.length !== 128 || !b.faceDescriptor.every((x) => typeof x === "number" && Number.isFinite(x))) {
+          fail(400, "Invalid facial scan data.");
+        }
+        faceDescriptor = b.faceDescriptor;
+      }
+      
       const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
       if (existing) {
         // Only hosts, who can already see this ticket, get it back
@@ -498,7 +581,7 @@ export function createApi(store) {
       }
 
       return store.mutate((d) => {
-        const reg = addRegistration(d, event, student, { email });
+        const reg = addRegistration(d, event, student, { email, faceDescriptor });
         return { existing: false, ticket: ticketView(d, req, reg) };
       });
     }],
@@ -550,9 +633,9 @@ export function createApi(store) {
         rev: d.rev,
         now: new Date().toISOString(),
         event: publicEvent(d, req, event),
-        registrations: regs,
+        registrations: regs.map(regView),
         logs: d.logs.filter((l) => l.eventId === id).sort((a, b) => b.time.localeCompare(a.time)),
-        directory: Object.values(d.directory),
+        directory: Object.values(d.directory).map(noFace),
         matcher: matcherSummary(d, id),
         forecast: forecastSummary(event),
       };
@@ -572,7 +655,7 @@ export function createApi(store) {
       if (b.outcome !== "unresolved") fail(400, "Only unreadable scans can be logged directly.");
       store.mutate((d) => {
         d.logs.push({ uid: newId(), eventId: id, time: new Date().toISOString(), studentId: null, outcome: "unresolved",
-          method: ["qr", "barcode", "ocr"].includes(b.method) ? b.method : "ocr" });
+          method: ["qr", "barcode", "ocr", "face"].includes(b.method) ? b.method : "ocr" });
         const scan = b.scanId && (d.ocrScans || []).find((s) => s.id === b.scanId && s.eventId === id);
         if (scan && !scan.resolution) scan.resolution = "none";
       });
@@ -585,6 +668,14 @@ export function createApi(store) {
       requireManage(req, event);
       const body = await readBody(req);
       return store.mutate((d) => matchRead(d, event, body));
+    }],
+
+    // Face match
+    ["POST", /^\/api\/events\/([\w-]+)\/match-face$/, async (req, [id]) => {
+      const event = findEvent(id);
+      requireManage(req, event);
+      const body = await readBody(req);
+      return matchFace(store.data, event, body);
     }],
 
     // Reset matcher

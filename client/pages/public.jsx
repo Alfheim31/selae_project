@@ -9,6 +9,9 @@ import {
   Cover, Mark, QrCode, Barcode, Trails, go, fmtTime, fmtDate, fmtRange, formatName, tidyName, tidyInitial, COLORS, COLOR_NAMES,
   skyOf, flightNo, prepareImage,
 } from "../components/shared.jsx";
+import { Camera } from "lucide-react";
+import { useCamera } from "../components/camera.jsx";
+import { extractFaceDescriptor } from "../lib/face.js";
 
 /* Public pages */
 
@@ -713,6 +716,14 @@ export const SUFFIXES = ["", "Jr.", "Sr.", "II", "III", "IV"];
 
 function RegisterForm({ event }) {
   const [f, setF] = useState({ first: "", middle: "", last: "", suffix: "", studentId: "", section: "", email: "" });
+  const [faceDescriptor, setFaceDescriptor] = useState(null);
+  const [faceStatus, setFaceStatus] = useState("Required: scan your face for fast gate entry.");
+  const [camOpen, setCamOpen] = useState(false);
+  const [scanningFace, setScanningFace] = useState(false);
+  const [camId, setCamId] = useState(null);
+  const cam = useCamera(camOpen, camId);
+  const fileInputRef = useRef(null);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -722,11 +733,60 @@ function RegisterForm({ event }) {
     return s.first && s.last ? formatName(s) : "";
   }, [f]);
 
+  const captureFromVideo = async () => {
+    if (!cam.videoRef.current) return;
+    setScanningFace(true);
+    setError("");
+    try {
+      const res = await extractFaceDescriptor(cam.videoRef.current);
+      if (!res) {
+        setFaceStatus("No face detected. Center your face in good lighting and try again.");
+      } else {
+        setFaceDescriptor(res.descriptor);
+        setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
+        setCamOpen(false);
+      }
+    } catch (err) {
+      setError("Failed to process face: " + err.message);
+    }
+    setScanningFace(false);
+  };
+
+  const captureFromFile = async (file) => {
+    if (!file) return;
+    setScanningFace(true);
+    setError("");
+    setFaceStatus("Analyzing photo…");
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("Could not read image."));
+        el.src = URL.createObjectURL(file);
+      });
+      const res = await extractFaceDescriptor(img);
+      URL.revokeObjectURL(img.src);
+      if (!res) {
+        setFaceStatus("Couldn't detect a clear face in that photo. Try another selfie.");
+      } else {
+        setFaceDescriptor(res.descriptor);
+        setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
+      }
+    } catch (err) {
+      setError("Failed to process photo: " + err.message);
+    }
+    setScanningFace(false);
+  };
+
   const submit = async (e) => {
     e.preventDefault();
+    if (!faceDescriptor) {
+      setError("Please complete the facial scan before registering.");
+      return;
+    }
     setBusy(true); setError("");
     try {
-      const out = await api.register(event.id, f);
+      const out = await api.register(event.id, { ...f, faceDescriptor });
       go(`t/${out.ticket.code}`);
     } catch (err) {
       setError(err.message);
@@ -756,9 +816,80 @@ function RegisterForm({ event }) {
         <label><span className="lbl">Section</span><input className="inp" value={f.section} onChange={set("section")} placeholder="BSCS 3-4" required /></label>
         <label className="sm:col-span-2"><span className="lbl">Email <span className="faint">(optional)</span></span><input className="inp" type="email" value={f.email} onChange={set("email")} autoComplete="email" /></label>
       </div>
+
+      {/* Facial Registration Block */}
+      <div className="panel p-4 flex flex-col gap-3" style={{ background: "var(--raised)" }}>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="lbl" style={{ marginBottom: 2 }}>Facial registration (Required)</div>
+            <div className="text-sm" style={{ color: faceDescriptor ? "var(--ok)" : "var(--muted)", fontWeight: faceDescriptor ? 600 : 400 }}>
+              {faceStatus}
+            </div>
+            <p className="text-xs muted" style={{ marginTop: 6 }}>
+              By scanning, you agree that SELAE saves a face signature (a set of numbers made from your photo, not the photo itself)
+              so this event's hosts can recognize you at the entrance. Your photo never leaves your device.
+            </p>
+          </div>
+
+          {faceDescriptor && <CheckCircle2 size={22} color="var(--ok)" />}
+        </div>
+
+        {camOpen && (
+          <div className="flex flex-col gap-2">
+            <div className="viewfinder" style={{ maxHeight: 280 }}>
+              <video ref={cam.videoRef} autoPlay playsInline muted />
+            </div>
+            {cam.devices.length > 1 && (
+              <select className="camselect" aria-label="Camera" value={camId || ""}
+                onChange={(e) => setCamId(e.target.value || null)} style={{ maxWidth: "100%" }}>
+                <option value="">Default camera</option>
+                {cam.devices.map((d, i) => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>
+                ))}
+              </select>
+            )}
+
+            {cam.state === "live" ? (
+              <div className="flex gap-2">
+                <button type="button" className="btn btn-primary btn-sm flex-1" disabled={scanningFace} onClick={captureFromVideo}>
+                  <Camera size={15} /> {scanningFace ? "Scanning…" : "Capture face"}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCamOpen(false)}>Cancel</button>
+              </div>
+            ) : (
+              <p className="text-xs muted">
+                {cam.state === "insecure"
+                  ? "Live camera requires localhost or HTTPS. Use the 'Take Selfie' button below instead."
+                  : "Waiting for camera permission…"}
+              </p>
+            )}
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="user"
+          hidden
+          onChange={(e) => captureFromFile(e.target.files[0])}
+        />
+
+        {!camOpen && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => setCamOpen(true)}>
+              <Camera size={15} /> {faceDescriptor ? "Retake via Webcam" : "Open Webcam"}
+            </button>
+            <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+              <Upload size={15} /> {scanningFace ? "Analyzing…" : faceDescriptor ? "Retake Selfie (Phone)" : "Take Selfie (Phone / Upload)"}
+            </button>
+          </div>
+        )}
+      </div>
+
       {preview && <p className="text-sm muted">On the guest list as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}
       {error && <ErrorBox message={error} />}
-      <button className="btn btn-primary" type="submit" disabled={busy} style={{ padding: ".75rem 1rem", fontSize: "1.15rem" }}>
+      <button className="btn btn-primary" type="submit" disabled={busy || !faceDescriptor} style={{ padding: ".75rem 1rem", fontSize: "1.15rem" }}>
         {busy ? "Registering…" : full ? "Join the waitlist" : "Register"}
       </button>
     </form>
@@ -790,7 +921,6 @@ export function TicketPage({ code }) {
 
   return (
     <div className="narrow py-6 flex flex-col gap-4" style={{ maxWidth: 480 }}>
-      <button className="btn btn-ghost btn-sm self-start" onClick={() => go(`e/${event.id}`)}><ArrowLeft size={16} /> Event page</button>
       <div className="pass-wrap">
         <div className="pass" style={{ overflow: "hidden" }}>
           <div className="band" style={{ background: skyOf(event.color), color: "#fff", padding: "1.2rem 1.3rem 1.4rem", position: "relative", overflow: "hidden" }}>
@@ -820,11 +950,15 @@ export function TicketPage({ code }) {
               {cancelled ? "This registration was cancelled."
                 : ticket.checkin ? "You're in. Enjoy the event."
                 : ticket.status === "waitlist" ? "You're on the waitlist. You can check in once you're moved to going."
-                : "Show your student ID at the entrance."}
+                : "At the entrance, look at the camera or show your student ID."}
             </p>
           </div>
         </div>
       </div>
+
+      <button className="btn btn-primary" onClick={() => go(`e/${event.id}`)}>
+        <ArrowLeft size={17} /> Back to event page
+      </button>
 
       {actionError && <ErrorBox message={actionError} />}
       {!cancelled && !ticket.checkin && !event.isPast && (

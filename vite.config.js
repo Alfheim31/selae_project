@@ -23,6 +23,20 @@ function tesseractAssets() {
       fs.mkdirSync(path.dirname(dest), { recursive: true })
       fs.copyFileSync(from, dest)
     }
+
+    // Face-api models for offline use 
+    const faceModelSrc = path.resolve('node_modules/@vladmandic/face-api/model')
+    const faceModelOut = path.resolve('client/public/models')
+    if (fs.existsSync(faceModelSrc)) {
+      fs.mkdirSync(faceModelOut, { recursive: true })
+      for (const f of fs.readdirSync(faceModelSrc)) {
+        if (f.includes('tiny_face_detector') || f.includes('face_landmark_68') || f.includes('face_recognition')) {
+          const s = path.join(faceModelSrc, f)
+          const d = path.join(faceModelOut, f)
+          if (!fs.existsSync(d)) fs.copyFileSync(s, d)
+        }
+      }
+    }
   }
   return { name: 'tesseract-assets', config: copy }
 }

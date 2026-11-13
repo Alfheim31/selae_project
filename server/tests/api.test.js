@@ -211,3 +211,53 @@ test("a malformed upload URL is a 404, not a crash", async (t) => {
   const { call } = setup(t);
   assert.equal((await call("GET", "/uploads/%E0%A4%A")).status, 404);
 });
+
+/* Face recognition */
+
+// 128 numbers; faces built from different bases are far apart
+const face = (base) => Array.from({ length: 128 }, (_, i) => base + i * 0.001);
+const hasFace = (json) => JSON.stringify(json).includes("faceDescriptor");
+
+test("face data never leaves the server", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const { id } = await event();
+  const reg = await register(id, "2099-00001", { faceDescriptor: face(0) });
+  assert.equal(reg.status, 200);
+  assert.equal(regOf(store, id, "2099-00001").faceDescriptor.length, 128);
+
+  const code = reg.json.ticket.code;
+  const ticket = await call("GET", `/api/tickets/${code}`);
+  const manage = await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP });
+  const match = await call("POST", `/api/events/${id}/match-face`, { descriptor: face(0) }, { from: LAPTOP });
+  const checkin = await call("POST", `/api/events/${id}/checkin`, { studentId: "2099-00001", method: "face", confidence: 0.9 }, { from: LAPTOP });
+  for (const [name, res] of Object.entries({ reg, ticket, manage, match, checkin })) {
+    assert.equal(res.status, 200, name);
+    assert.ok(!hasFace(res.json), `${name} response leaks faceDescriptor`);
+  }
+});
+
+test("registering again with someone else's face doesn't replace the first face", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const a = await event(), b = await event();
+  await register(a.id, "2099-00001", { faceDescriptor: face(0) });
+  await register(b.id, "2099-00001", { faceDescriptor: face(0.5) }, { from: "10.0.0.50" });
+  assert.equal(store.data.directory["2099-00001"].faceDescriptor, undefined);
+
+  const owner = await call("POST", `/api/events/${a.id}/match-face`, { descriptor: face(0) }, { from: LAPTOP });
+  assert.equal(owner.json.decision, "auto");
+  assert.equal(owner.json.candidates[0].student.id, "2099-00001");
+  const impostor = await call("POST", `/api/events/${a.id}/match-face`, { descriptor: face(0.5) }, { from: LAPTOP });
+  assert.equal(impostor.json.decision, "reject");
+});
+
+test("face data is checked at registration and at the gate", async (t) => {
+  const { call, event, register } = setup(t);
+  const { id } = await event();
+  const bad = [face(0).slice(0, 127), [...face(0).slice(0, 127), "x"], [...face(0).slice(0, 127), null], "nope"];
+  for (const descriptor of bad) {
+    assert.equal((await register(id, "2099-00009", { faceDescriptor: descriptor })).status, 400);
+    assert.equal((await call("POST", `/api/events/${id}/match-face`, { descriptor }, { from: LAPTOP })).status, 400);
+  }
+  // Only hosts can run face matching
+  assert.equal((await call("POST", `/api/events/${id}/match-face`, { descriptor: face(0) })).status, 403);
+});
