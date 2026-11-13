@@ -19,6 +19,7 @@ const TABLES = [
   { table: "logs", key: "uid", field: "logs", kind: "array", eventId: true },
   { table: "ocr_scans", key: "id", field: "ocrScans", kind: "array", eventId: true },
   { table: "directory", key: "id", field: "directory", kind: "map" },
+  { table: "profiles", key: "id", field: "profiles", kind: "map" },
   { table: "state", key: "key", field: null, kind: "state" },
 ];
 const COLLECTIONS = new Set(TABLES.map((t) => t.field).filter(Boolean));

@@ -11,6 +11,9 @@ create table if not exists ocr_scans (
   id text primary key, event_id text, data jsonb not null, seq bigserial, updated_at timestamptz not null default now());
 create table if not exists directory (
   id text primary key, data jsonb not null, seq bigserial, updated_at timestamptz not null default now());
+-- One per Google account: student number, name, section, face signature
+create table if not exists profiles (
+  id text primary key, data jsonb not null, seq bigserial, updated_at timestamptz not null default now());
 create table if not exists state (
   key text primary key, data jsonb not null, seq bigserial, updated_at timestamptz not null default now());
 
@@ -25,6 +28,7 @@ alter table registrations enable row level security;
 alter table logs enable row level security;
 alter table ocr_scans enable row level security;
 alter table directory enable row level security;
+alter table profiles enable row level security;
 alter table state enable row level security;
 
 -- Cover photos and event photos. Public, so phones can load them straight from Supabase.
