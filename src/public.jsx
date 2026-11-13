@@ -827,7 +827,12 @@ function RegisterForm({ event }) {
             <div className="text-sm" style={{ color: faceDescriptor ? "var(--ok)" : "var(--muted)", fontWeight: faceDescriptor ? 600 : 400 }}>
               {faceStatus}
             </div>
+            <p className="text-xs muted" style={{ marginTop: 6 }}>
+              By scanning, you agree that SELAE saves a face signature (a set of numbers made from your photo, not the photo itself)
+              so this event's hosts can recognize you at the entrance. Your photo never leaves your device.
+            </p>
           </div>
+
           {faceDescriptor && <CheckCircle2 size={22} color="var(--ok)" />}
         </div>
 
