@@ -63,9 +63,20 @@ function publicEvent(data, req, e) {
     counts: c, spotsLeft: Math.max(0, e.capacity - c.going), isPast,
     registrationOpen: e.registrationOpen && !isPast, canManage: canManage(req, e) };
 }
+// Face data stays on the server
+function noFace(s) {
+  if (!s || !("faceDescriptor" in s)) return s;
+  const { faceDescriptor, ...rest } = s;
+  return rest;
+}
+function regView(r) {
+  const { faceDescriptor, ...rest } = r;
+  return { ...rest, student: noFace(rest.student) };
+}
+
 function ticketView(data, req, reg) {
   const event = data.events.find((e) => e.id === reg.eventId);
-  const student = reg.student || data.directory[reg.studentId];
+  const student = noFace(reg.student || data.directory[reg.studentId]);
   return {
     code: reg.code, status: reg.status, createdAt: reg.createdAt, checkin: reg.checkin,
     student, event: event ? publicEvent(data, req, event) : null,
@@ -124,7 +135,7 @@ function checkIn(data, event, body, canLearn) {
     if (found.eventId !== event.id) {
       const other = data.events.find((e) => e.id === found.eventId);
       log("wrongevent", found.studentId);
-      return { outcome: "wrongevent", time: now, student: data.directory[found.studentId], otherEvent: other ? { id: other.id, title: other.title, startsAt: other.startsAt } : null };
+      return { outcome: "wrongevent", time: now, student: noFace(data.directory[found.studentId]), otherEvent: other ? { id: other.id, title: other.title, startsAt: other.startsAt } : null };
     }
     reg = found;
     studentId = found.studentId;
@@ -137,7 +148,7 @@ function checkIn(data, event, body, canLearn) {
 
   const learned = resolveScan(data, event, body, method, studentId, canLearn);
 
-  const student = data.directory[studentId] || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
+  const student = noFace(data.directory[studentId]) || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
   if (!reg || reg.status === "cancelled") { log("notreg", studentId); return { outcome: "notreg", time: now, student }; }
   if (reg.status === "waitlist") { log("waitlist", studentId); return { outcome: "waitlist", time: now, student }; }
   if (reg.checkin) { log("dup", studentId); return { outcome: "dup", time: now, student, previous: reg.checkin }; }
@@ -182,7 +193,7 @@ function matchRead(data, event, body) {
   return {
     scanId: scan.id, read: pretty(read), decision: out.decision, pUnknown: out.pUnknown, thresholds: out.thresholds,
     candidates: out.candidates.map((c) => ({ p: c.p, status: statusOf(c.reg),
-      student: data.directory[c.id] || { id: c.id, last: "", first: "", middle: "", suffix: "", section: "" } })),
+      student: noFace(data.directory[c.id]) || { id: c.id, last: "", first: "", middle: "", suffix: "", section: "" } })),
   };
 }
 
@@ -245,7 +256,7 @@ function matchFace(data, event, body) {
       p: c.p,
       dist: Math.round(c.dist * 1000) / 1000,
       status: c.status,
-      student: c.student,
+      student: noFace(c.student),
     })),
   };
 }
@@ -557,12 +568,9 @@ export function createApi(store) {
 
       return store.mutate((d) => {
         // The first entry stays; the name typed here only goes on this ticket
-        const student = { id: studentId, last, first, middle, suffix, section, ...(faceDescriptor ? { faceDescriptor } : {}) };
-        if (!d.directory[studentId]) {
-          d.directory[studentId] = student;
-        } else {
-          d.directory[studentId].faceDescriptor = faceDescriptor;
-        }
+        const student = { id: studentId, last, first, middle, suffix, section };
+        if (!d.directory[studentId]) d.directory[studentId] = student;
+
         const going = counts(d, id).going;
         const reg = { id: newId(), eventId: id, code: newCode(), studentId, student, faceDescriptor, email, status: going < event.capacity ? "going" : "waitlist",
           createdAt: new Date().toISOString(), checkin: null };
@@ -605,9 +613,9 @@ export function createApi(store) {
         rev: d.rev,
         now: new Date().toISOString(),
         event: publicEvent(d, req, event),
-        registrations: regs,
+        registrations: regs.map(regView),
         logs: d.logs.filter((l) => l.eventId === id).sort((a, b) => b.time.localeCompare(a.time)),
-        directory: Object.values(d.directory),
+        directory: Object.values(d.directory).map(noFace),
         matcher: matcherSummary(d, id),
         forecast: forecastSummary(event),
       };

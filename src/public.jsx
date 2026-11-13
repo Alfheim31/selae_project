@@ -722,7 +722,8 @@ function RegisterForm({ event }) {
   const [faceStatus, setFaceStatus] = useState("Required: scan your face for fast gate entry.");
   const [camOpen, setCamOpen] = useState(false);
   const [scanningFace, setScanningFace] = useState(false);
-  const cam = useCamera(camOpen);
+  const [camId, setCamId] = useState(null);
+  const cam = useCamera(camOpen, camId);
   const fileInputRef = useRef(null);
 
   const [busy, setBusy] = useState(false);
@@ -835,6 +836,16 @@ function RegisterForm({ event }) {
             <div className="viewfinder" style={{ maxHeight: 280 }}>
               <video ref={cam.videoRef} autoPlay playsInline muted />
             </div>
+            {cam.devices.length > 1 && (
+              <select className="camselect" aria-label="Camera" value={camId || ""}
+                onChange={(e) => setCamId(e.target.value || null)} style={{ maxWidth: "100%" }}>
+                <option value="">Default camera</option>
+                {cam.devices.map((d, i) => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>
+                ))}
+              </select>
+            )}
+
             {cam.state === "live" ? (
               <div className="flex gap-2">
                 <button type="button" className="btn btn-primary btn-sm flex-1" disabled={scanningFace} onClick={captureFromVideo}>
@@ -907,7 +918,6 @@ export function TicketPage({ code }) {
 
   return (
     <div className="narrow py-6 flex flex-col gap-4" style={{ maxWidth: 480 }}>
-      <button className="btn btn-ghost btn-sm self-start" onClick={() => go(`e/${event.id}`)}><ArrowLeft size={16} /> Event page</button>
       <div className="pass-wrap">
         <div className="pass" style={{ overflow: "hidden" }}>
           <div className="band" style={{ background: skyOf(event.color), color: "#fff", padding: "1.2rem 1.3rem 1.4rem", position: "relative", overflow: "hidden" }}>
@@ -942,6 +952,10 @@ export function TicketPage({ code }) {
           </div>
         </div>
       </div>
+
+      <button className="btn btn-primary" onClick={() => go(`e/${event.id}`)}>
+        <ArrowLeft size={17} /> Back to event page
+      </button>
 
       {actionError && <ErrorBox message={actionError} />}
       {!cancelled && !ticket.checkin && !event.isPast && (
