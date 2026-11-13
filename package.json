@@ -8,14 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "vite build && node server/index.js",
-    "test": "node --test server/matcher.test.js server/forecast.test.js server/api.test.js server/store.test.js",
-    "eval": "node scripts/eval-matcher.js",
-    "eval:turnout": "node scripts/eval-turnout.js"
+    "test": "node --test \"server/tests/*.test.js\"",
+    "eval": "node server/eval/eval-matcher.js",
+    "eval:turnout": "node server/eval/eval-turnout.js"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
     "@fontsource/barlow-condensed": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@supabase/supabase-js": "^2.119.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "lucide-react": "^1.47.0",
     "qrcode": "^1.5.4",

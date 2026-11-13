@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { openStore } from "./store.js";
-import { createApi } from "./api.js";
+import { openStore } from "../storage/store.js";
+import { createApi } from "../api.js";
 
 /* Check-in rules, through the real routes */
 
@@ -158,6 +158,53 @@ test("requests through a tunnel or proxy aren't treated as the laptop", async (t
     const res = await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP, headers: { [header]: "203.0.113.5" } });
     assert.equal(res.status, 403, header);
   }
+});
+
+test("a host can add a student at the gate, even with registration closed", async (t) => {
+  const { store, call, event } = setup(t);
+  const { id } = await event();
+  await call("PATCH", `/api/events/${id}`, { registrationOpen: false }, { from: LAPTOP });
+  const body = { studentId: "2099-00001", first: "ana", last: "reyes", section: "bscs 3-4" };
+
+  assert.equal((await call("POST", `/api/events/${id}/walkin`, body)).status, 403);
+  assert.equal((await call("POST", `/api/events/${id}/walkin`, { ...body, section: "" }, { from: LAPTOP })).status, 400);
+  assert.equal(regOf(store, id, "2099-00001"), undefined);
+
+  const added = await call("POST", `/api/events/${id}/walkin`, body, { from: LAPTOP });
+  assert.equal(added.json.outcome, "approved");
+  assert.equal(added.json.added, true);
+  assert.equal(added.json.student.section, "BSCS 3-4");
+  assert.equal(store.data.directory["2099-00001"].first, "Ana");
+  assert.equal(regOf(store, id, "2099-00001").walkIn, true);
+
+  const again = await call("POST", `/api/events/${id}/walkin`, body, { from: LAPTOP });
+  assert.equal(again.json.outcome, "dup");
+  assert.equal(again.json.added, false);
+  assert.equal(store.data.registrations.filter((r) => r.eventId === id && r.studentId === "2099-00001").length, 1);
+});
+
+test("adding at the gate keeps the file's name and goes to the waitlist when the event is full", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const a = await event();
+  await register(a.id, "2099-00001", { first: "Maria", last: "Santos" });
+  const b = await event(1);
+  await register(b.id, "2099-00002");
+
+  const res = await call("POST", `/api/events/${b.id}/walkin`, { studentId: "2099-00001", first: "Fake", last: "Name", section: "X" }, { from: LAPTOP });
+  assert.equal(res.json.outcome, "waitlist");
+  assert.equal(res.json.student.first, "Maria");
+  assert.equal(store.data.directory["2099-00001"].first, "Maria");
+  assert.equal(regOf(store, b.id, "2099-00001").checkin, null);
+});
+
+test("adding a student resolves the scan that led to the form", async (t) => {
+  const { store, call, event } = setup(t);
+  const { id } = await event();
+  const m = await call("POST", `/api/events/${id}/match`, { read: "209900001", source: "camera" }, { from: LAPTOP });
+  await call("POST", `/api/events/${id}/walkin`, { studentId: "2099-00001", first: "Ana", last: "Reyes", section: "A", scanId: m.json.scanId }, { from: LAPTOP });
+  const scan = store.data.ocrScans.find((s) => s.id === m.json.scanId);
+  assert.equal(scan.resolution, "manual");
+  assert.equal(scan.truth, "2099-00001");
 });
 
 test("a malformed upload URL is a 404, not a crash", async (t) => {

@@ -10,7 +10,7 @@ import '@fontsource/barlow-condensed/600.css'
 import '@fontsource/barlow-condensed/700.css'
 import '@fontsource/ibm-plex-mono/400.css'
 import '@fontsource/ibm-plex-mono/500.css'
-import App from './SELAE_Frontend.jsx'
+import App from './pages/SELAE_Frontend.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

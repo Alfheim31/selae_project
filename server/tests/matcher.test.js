@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rank, learn, emptyModel, channel, PRIOR_WEIGHT, bestAlignment, digitAccuracy } from "./matcher.js";
+import { rank, learn, emptyModel, channel, PRIOR_WEIGHT, bestAlignment, digitAccuracy } from "../intelligence/matcher.js";
 
 const going = (id) => ({ id, weight: PRIOR_WEIGHT.expected });
 const people = [

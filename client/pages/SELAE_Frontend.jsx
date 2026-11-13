@@ -3,18 +3,17 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import {
   LayoutDashboard, ScanLine, BarChart3, Search, CheckCircle2, XCircle, AlertTriangle, Camera, CameraOff,
   Volume2, VolumeX, Lock, Download, History, HelpCircle, Ban, Keyboard, Printer, QrCode as QrIcon, Settings,
-  ArrowLeft, ExternalLink, Copy, Clock, CalendarX, WifiOff, Brain, Images, ImagePlus, Trash2, X,
+  ArrowLeft, ExternalLink, Copy, Clock, CalendarX, WifiOff, Brain, Images, ImagePlus, Trash2, X, UserPlus,
 } from "lucide-react";
-import { useBeep, HoldToExit, useCamera, CameraStage } from "./camera.jsx";
-import { readStudentNumber, digitsApart } from "./ocr.js";
-import { api, hostKeys } from "./api.js";
+import { useBeep, HoldToExit, useCamera, CameraStage } from "../components/camera.jsx";
+import { readStudentNumber, digitsApart } from "../lib/ocr.js";
+import { api, hostKeys } from "../lib/api.js";
 import {
   CSS, Mark, QrCode, Barcode, Trails, skyOf, flightNo, go, useHashRoute, useToast, fmtTime, fmtDate, fmtDateShort, formatName, norm, pct,
-  METHOD_LABEL, METHOD_SHORT, OUTCOME_LABEL,
-} from "./shared.jsx";
-import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "./forecast.jsx";
-import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox } from "./public.jsx";
-import { prepareImage } from "./images.js";
+  METHOD_LABEL, METHOD_SHORT, OUTCOME_LABEL, prepareImage,
+} from "../components/shared.jsx";
+import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "../components/forecast.jsx";
+import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox, SUFFIXES } from "./public.jsx";
 
 /* SELAE — Smart Event Logistics and Analytics Engine */
 
@@ -688,15 +687,22 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       return;
     }
     if (token !== scanToken.current) return;
+    report(res, target, method, confidence);
+  };
+
+  const report = (res, target, method, confidence) => {
     refresh();
     const student = res.student;
     if (res.outcome === "approved") {
-      show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(res.learned) });
+      show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(res.learned), added: Boolean(res.added) });
       beep("ok");
       later(reset, 3500);
     } else if (res.outcome === "unresolved") {
       show({ type: "unknown", read: target.ticket || target.studentId });
       beep("error");
+    } else if (res.outcome === "notreg") {
+      show({ type: "notlisted", number: student.id });
+      beep("attention");
     } else {
       show({ type: res.outcome, student, method, otherEvent: res.otherEvent,
         previous: res.previous ? { ...res.previous, time: new Date(res.previous.time) } : null });
@@ -729,10 +735,29 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       beep("attention");
     } else {
       pendingScan.current = m.scanId;
-      setResult({ type: "lowmatch", read: m.read, best: top || null, pUnknown: m.pUnknown, scanId: m.scanId });
+      setResult({ type: "notlisted", number: m.read });
       setPhase("result");
-      beep("error");
+      beep("attention");
     }
+  };
+
+  // Student missing from the list
+  const addStudent = async (fields) => {
+    const token = ++scanToken.current;
+    const res = await api.addStudent(eventId, { ...fields, scanId: pendingScan.current || undefined });
+    if (token !== scanToken.current) return;
+    pendingScan.current = null;
+    lastCard.current = { read: res.student.id.replace(/\D/g, ""), seen: Date.now() };
+    report(res, { studentId: res.student.id }, "manual", null);
+  };
+
+  const addFromSearch = (text) => {
+    const typed = text.trim();
+    reset();
+    setQ("");
+    setPath(["manual"]);
+    show({ type: "add", title: "Add a student", message: "No one on file matches that search. Add them to the guest list and check them in.",
+      initial: /\d/.test(typed) ? { studentId: typed } : { last: typed } });
   };
 
   // Continuous student number scan
@@ -905,9 +930,16 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
 
         {/* Result panel */}
         <div className="lg:col-span-2 lg:row-span-2 min-w-0" aria-live="assertive">
-          <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} onReset={reset}
+          <ResultPanel phase={phase} result={result} camera={cameraUsable} live={live} capacity={capacity} data={data} onAdd={addStudent}
+            onReset={() => { pendingScan.current = null; reset(); }}
             onConfirm={(c) => decide({ studentId: c.student.id }, "confirmed", c.p, { scanId: result && result.scanId })}
-            onNone={() => { api.logUnresolved(eventId, "ocr", result && result.scanId).then(refresh).catch(() => {}); reset(); focusManual(); }}
+            onNone={() => {
+              api.logUnresolved(eventId, "ocr", result && result.scanId).then(refresh).catch(() => {});
+              setResult({ type: "add", title: "Student not on the list", initial: { studentId: result.read },
+                message: `None of the matches were right for ${result.read}. Check the number against the ID, then add the student.` });
+            }}
+            onOpenAdd={() => setResult({ type: "add", title: "Add student", initial: { studentId: result.number },
+              message: "Check the number against the ID, then fill in the rest." })}
             onManual={() => { reset(); focusManual(); }} />
         </div>
 
@@ -927,7 +959,10 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                 placeholder="Type a student number or name, e.g. 2024- or dela cruz"
                 onChange={(e) => { setQ(e.target.value); setActive(0); }}
                 onKeyDown={(e) => {
-                  if (!suggestions.length) return;
+                  if (!suggestions.length) {
+                    if (e.key === "Enter" && q.trim().length >= 2) { e.preventDefault(); addFromSearch(q); }
+                    return;
+                  }
                   if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, suggestions.length - 1)); }
                   if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
                   if (e.key === "Enter") { e.preventDefault(); chooseManual(suggestions[active]); }
@@ -940,7 +975,12 @@ function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                       <span><span className="font-bold">{formatName(s)}</span> <span className="muted text-sm">{s.section}</span></span>
                       <span className="text-sm faint">{s.id}{actions.isRegistered(s.id) ? "" : ", not registered"}</span>
                     </button>
-                  )) : <div className="p-3 muted">No student matches “{q}”.</div>}
+                  )) : (
+                    <button onClick={() => addFromSearch(q)}>
+                      <span className="muted">No student matches “{q}”.</span>
+                      <span className="font-bold flex items-center gap-1"><UserPlus size={15} /> Add student</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -970,7 +1010,68 @@ function DigitDiff({ id, read }) {
   );
 }
 
-function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm, onNone, onManual }) {
+function AddStudentForm({ result, data, onAdd, onManual, onReset }) {
+  const [f, setF] = useState({ studentId: "", first: "", middle: "", last: "", suffix: "", section: "", ...result.initial });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+
+  // A number already on file keeps its name and section
+  const m = f.studentId.trim().match(/^(\d{4})\s*-?\s*(\d{5})$/);
+  const sid = m ? `${m[1]}-${m[2]}` : "";
+  const onFile = data.byId.get(sid) || null;
+  const v = onFile ? { ...f, first: onFile.first, middle: onFile.middle, last: onFile.last, suffix: onFile.suffix, section: onFile.section } : f;
+  const reg = data.regByStudent.get(sid);
+  const full = !reg && data.going.length >= data.capacity;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await onAdd(v);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="result warn" onSubmit={submit} noValidate>
+      <div className="state"><UserPlus size={28} /> {result.title}</div>
+      <p>{result.message}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="sm:col-span-2"><span className="lbl">Student number</span>
+          <input className="inp mono" value={f.studentId} onChange={set("studentId")} placeholder="2024-12345" inputMode="numeric" autoComplete="off" required /></label>
+        <label><span className="lbl">Given name</span>
+          <input className="inp" value={v.first} onChange={set("first")} readOnly={Boolean(onFile)} autoFocus={!onFile} autoComplete="off" required /></label>
+        <label><span className="lbl">Surname</span>
+          <input className="inp" value={v.last} onChange={set("last")} readOnly={Boolean(onFile)} autoComplete="off" required /></label>
+        <label><span className="lbl">Middle initial (optional)</span>
+          <input className="inp" value={v.middle} onChange={set("middle")} readOnly={Boolean(onFile)} autoComplete="off" /></label>
+        <label><span className="lbl">Suffix (optional)</span>
+          <select className="inp" value={v.suffix} onChange={set("suffix")} disabled={Boolean(onFile)}>
+            {SUFFIXES.map((s) => <option key={s} value={s}>{s || "None"}</option>)}
+          </select></label>
+        <label className="sm:col-span-2"><span className="lbl">Section</span>
+          <input className="inp" value={v.section} onChange={set("section")} readOnly={Boolean(onFile)} placeholder="BSCS 3-4" autoComplete="off" required /></label>
+      </div>
+      {onFile && <p className="text-sm font-bold">{reg ? "Already on the guest list." : "Already on file, so the name and section stay as they are."}</p>}
+      {full && <p className="text-sm font-bold">This event is full, so they'll go on the waitlist instead of checking in.</p>}
+      {error && <p className="font-bold" role="alert">{error}</p>}
+      <div className="flex flex-col gap-2 mt-auto">
+        <button className="btn btn-on" type="submit" disabled={busy} autoFocus={Boolean(onFile)}>
+          <UserPlus size={16} /> {busy ? "Saving…" : reg ? "Check in" : full ? "Add to waitlist" : "Add and check in"}
+        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn btn-on flex-1" type="button" onClick={onManual}><Keyboard size={16} /> Manual entry</button>
+          <button className="btn btn-on flex-1" type="button" onClick={onReset}>Next attendee</button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function ResultPanel({ phase, result, camera, live, capacity, data, onAdd, onOpenAdd, onReset, onConfirm, onNone, onManual }) {
   if (phase === "ocr" || phase === "checking") {
     const title = phase === "checking" ? "Checking the guest list" : "Reading student number";
     const text = phase === "checking" ? "One moment." : "Keep the ID still.";
@@ -1016,6 +1117,7 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
             {result.method === "manual" && "Entered manually"}
             {` at ${fmtTime(result.time)}`}
           </p>
+          {result.added && <p className="font-bold">Added to the guest list.</p>}
           {result.learned && <p className="text-sm flex items-center gap-2"><Brain size={15} /> SELAE learned from this correction.</p>}
           <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "3.5s" }} /></div>
         </div>
@@ -1030,16 +1132,22 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
           <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "5s" }} /></div>
         </div>
       );
-    case "notreg":
+    case "notlisted":
       return (
-        <div className="result bad">
-          <div className="state"><XCircle size={28} /> Not registered for this event</div>
-          <div className="who">{formatName(result.student)}</div>
-          <Meta s={result.student} />
-          <p className="font-bold">This student isn't on the guest list. They can register on their phone from the event page, if spots are left.</p>
-          <button className="btn btn-on mt-auto" onClick={onReset} autoFocus>Next attendee</button>
+        <div className="result warn">
+          <div className="state"><HelpCircle size={28} /> Student not on the list yet</div>
+          <div className="who">{result.number}</div>
+          <div className="flex flex-col gap-2 mt-auto">
+            <button className="btn btn-on" onClick={onOpenAdd} autoFocus><UserPlus size={16} /> Add student</button>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn btn-on flex-1" onClick={onManual}><Keyboard size={16} /> Manual entry</button>
+              <button className="btn btn-on flex-1" onClick={onReset}>Next attendee</button>
+            </div>
+          </div>
         </div>
       );
+    case "add":
+      return <AddStudentForm key={`${result.title}|${result.initial.studentId || result.initial.last}`} result={result} data={data} onAdd={onAdd} onManual={onManual} onReset={onReset} />;
     case "waitlist":
       return (
         <div className="result bad">
@@ -1089,22 +1197,7 @@ function ResultPanel({ phase, result, camera, live, capacity, onReset, onConfirm
             ))}
           </div>
           {result.pUnknown >= 0.01 && <p className="text-sm">{pct(result.pUnknown)} chance it's someone not on file. Underlined digits differ from what was read.</p>}
-          <button className="btn btn-on mt-auto" onClick={onNone}>None of these, type it instead</button>
-        </div>
-      );
-    case "lowmatch":
-      return (
-        <div className="result warn">
-          <div className="state"><HelpCircle size={28} /> No confident match</div>
-          <p className="text-lg">
-            SELAE read <strong>{result.read}</strong> but couldn't match it to anyone with confidence
-            {result.best ? <> (closest: {formatName(result.best.student)}, {pct(result.best.p)})</> : null}.
-            Check the ID and type the student number or name. Your answer teaches SELAE how this camera misreads digits.
-          </p>
-          <div className="flex flex-col gap-2 mt-auto">
-            <button className="btn btn-on" onClick={onManual} autoFocus><Keyboard size={16} /> Go to manual entry</button>
-            <button className="btn btn-on" onClick={onReset}>Next attendee</button>
-          </div>
+          <button className="btn btn-on mt-auto" onClick={onNone}>None of these, add student</button>
         </div>
       );
     case "unknown":
@@ -1385,7 +1478,7 @@ function TestTickets({ data, eventId, onOpenScanner }) {
       { key: "ok", title: "Going, not yet checked in", expect: "Checks in (green)", list: data.going.filter((r) => !r.checkin).slice(0, 6).map(ticket) },
       { key: "dup", title: "Already checked in", expect: "Already checked in (blue)", list: data.going.filter((r) => r.checkin).slice(0, 3).map(ticket) },
       { key: "wait", title: "On the waitlist", expect: "On the waitlist (red)", list: data.waitlist.slice(0, 3).map(ticket) },
-      { key: "notreg", title: "On file, not registered", expect: "Not registered (red)",
+      { key: "notreg", title: "On file, not registered", expect: "Not on the list yet, with Add student (amber)",
         list: notReg.map((s) => ({ key: s.id, student: s })) },
     ].filter((g) => g.list.length);
   }, [data]);

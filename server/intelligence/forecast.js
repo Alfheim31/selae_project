@@ -156,7 +156,8 @@ export function buildExamples(data, now = new Date()) {
     for (const reg of going) {
       const h = hist.get(reg.studentId) || [];
       const { x } = describeRegistration(reg, event, data.directory[reg.studentId], h);
-      rows.push({ x, y: reg.checkin ? 1 : 0, eventIndex, eventId: event.id });
+      // Walk-ins are only added once they're at the gate, so they say nothing about no-shows
+      if (!reg.walkIn) rows.push({ x, y: reg.checkin ? 1 : 0, eventIndex, eventId: event.id });
       done.push([reg.studentId, Boolean(reg.checkin)]);
       if (reg.checkin) arrivals.push((new Date(reg.checkin.time) - startMs(event)) / 60000);
     }

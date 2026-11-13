@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* Evaluates the OCR matcher */
 import fs from "node:fs";
-import { rank, learn, emptyModel, PRIOR_WEIGHT, digitsOf, CONFUSABLE } from "../server/matcher.js";
+import { rank, learn, emptyModel, PRIOR_WEIGHT, digitsOf, CONFUSABLE } from "../intelligence/matcher.js";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1] && !all[i + 1].startsWith("--") ? all[i + 1] : true]);

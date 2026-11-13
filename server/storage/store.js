@@ -1,26 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
-import { buildSeed } from "./seed.js";
+import { fileURLToPath } from "node:url";
+import { buildSeed } from "../seed/seed.js";
 
-/* Physical layer */
+/* Physical layer: a JSON file here, or Supabase (supabase.js) when .env names a project */
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const SAVE_DELAY = 200;
 const MAX_LOGS = 50000;
 
-// Pending saves still reach the disk when the process ends
+// Pending saves still reach the disk, or Supabase, when the process ends
 const openStores = new Set();
-const flushAll = () => {
-  for (const s of openStores) {
-    try { s.flush(); } catch (e) { console.error(`SELAE: couldn't save ${s.file} on exit.`, e); }
-  }
-};
+const flushAll = () => Promise.all([...openStores].map(async (s) => {
+  try { await s.flush(); } catch (e) { console.error(`SELAE: couldn't save ${s.file} on exit.`, e); }
+}));
 let exitHooked = false;
 function hookExit() {
   if (exitHooked) return;
   exitHooked = true;
-  process.on("exit", flushAll);
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(signal, () => process.exit(0));
+  process.on("exit", () => { flushAll(); });
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(signal, () => { flushAll().finally(() => process.exit(0)); });
 }
+export function trackStore(store) { openStores.add(store); hookExit(); return store; }
+export function untrackStore(store) { openStores.delete(store); }
 
 function parseData(file) {
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -114,9 +117,22 @@ export function openStore(file) {
       return out;
     },
     flush,
-    close() { flush(); openStores.delete(store); },
+    close() { flush(); untrackStore(store); },
+    putUpload(name, buf) { fs.writeFileSync(path.join(uploadsDir, name), buf); return `/uploads/${name}`; },
+    removeUpload(name) { fs.rm(path.join(uploadsDir, name), { force: true }, () => {}); },
+    uploadUrl: (name) => `/uploads/${name}`,
   };
-  openStores.add(store);
-  hookExit();
-  return store;
+  return trackStore(store);
+}
+
+// Supabase when .env (or the environment) names a project, otherwise the local file
+export async function connectStore(file = process.env.SELAE_DATA || path.join(ROOT, "data/selae.json")) {
+  try { process.loadEnvFile(path.join(ROOT, ".env")); } catch { /* no .env: local file */ }
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_KEY;
+  if (url && key) {
+    const { openSupabaseStore } = await import("./supabase.js");
+    return openSupabaseStore({ url, key });
+  }
+  console.log("SELAE: no SUPABASE_URL in .env, so the data stays in a local file (see .env.example).");
+  return openStore(file);
 }

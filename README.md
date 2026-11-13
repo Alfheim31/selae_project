@@ -66,15 +66,18 @@ through `@fontsource` so they work offline.
 ## Requirements
 
 - Node.js 20 or newer
+- Python 3 (only for `run.py`; everything else is Node)
 - A webcam on the laptop at the gate (the app still works without one: manual
   entry covers it)
 
 ## Running it
 
 ```bash
-npm install
-npm run dev
+python run.py
 ```
+
+The first run installs the dependencies; later runs skip that step unless
+`package.json` changed. (Without Python: `npm install` once, then `npm run dev`.)
 
 The terminal prints two addresses:
 
@@ -87,10 +90,10 @@ The terminal prints two addresses:
 ### At the venue
 
 ```bash
-npm start
+python run.py venue
 ```
 
-This builds the app and serves it from a single Node server on port 8080 (set
+This builds the app (`npm start` does the same) and serves it from a single Node server on port 8080 (set
 `PORT` to change it). It's faster and steadier than the dev server for a real
 event.
 
@@ -107,8 +110,25 @@ real authentication: there are no accounts or passwords.
 
 ## Data
 
-Events, registrations and scans are saved to `data/selae.json` on the laptop, and
-uploaded covers and photos to `data/uploads/` (both ignored by git). The first run creates it with:
+SELAE keeps its data in **Supabase** (Postgres plus Storage) when a `.env` file
+names a project, and otherwise in a local JSON file. To use Supabase:
+
+1. Create a project at supabase.com. In **SQL Editor**, paste `server/storage/supabase.sql`
+   and run it once. It creates six tables (`events`, `registrations`, `logs`,
+   `ocr_scans`, `directory`, `state`) and a public `uploads` bucket for photos.
+2. Copy `.env.example` to `.env` and fill in the **Project URL** and the
+   **service_role** key from Project Settings → API. The key stays on the server;
+   phones never see it.
+3. Start the app. An empty project gets the demo data below on the first run.
+
+Each table row holds one record as JSON. The server keeps a working copy in memory
+(the matcher and the forecast train on the whole history) and writes only the rows
+that changed, within 200 ms of each change and on shutdown. If Supabase can't be
+reached, the change stays pending and is retried every 5 seconds. Supabase needs
+an internet connection at the venue; without a `.env`, everything stays offline in
+`data/selae.json`, with covers and photos in `data/uploads/` (both ignored by git).
+
+The first run creates the data with:
 
 - a semester of **simulated past events** (14 of them, marked as simulated), so
   the turnout forecast has history to learn from;
@@ -118,13 +138,14 @@ uploaded covers and photos to `data/uploads/` (both ignored by git). The first r
 - six more upcoming events from three hosts, so Discover has categories and
   calendars to browse.
 
-To start over, stop the server and delete the file. A data file from before the
-turnout forecast has no past events, so the forecast falls back to an average
-show-up rate until you delete it or run real events. To keep a different file, set `SELAE_DATA=path/to/file.json`.
+To start over, stop the server and empty the tables (or delete the local file).
+A data set from before the turnout forecast has no past events, so the forecast
+falls back to an average show-up rate until you start over or run real events.
+To keep a different local file, set `SELAE_DATA=path/to/file.json`.
 
 Changes are saved within 200 ms and on shutdown, so a sudden power cut can lose the
-last moment of activity. Each save keeps the previous version as `selae.json.bak`.
-If the data file can't be read at startup, SELAE keeps a `.corrupt` copy of it and
+last moment of activity. The local file keeps the previous version as
+`selae.json.bak`; if it can't be read at startup, SELAE keeps a `.corrupt` copy and
 restores the backup.
 
 ## Intelligent component 1: OCR matching that learns
@@ -132,12 +153,12 @@ restores the backup.
 SELAE reads the printed student number and decides who the attendee is. OCR under glare makes mistakes, so this
 is a decision under uncertainty, not a lookup. It works like an agent:
 
-1. **Perceives.** Tesseract (`src/ocr.js`) keeps reading the whole visible camera
+1. **Perceives.** Tesseract (`client/lib/ocr.js`) keeps reading the whole visible camera
    frame, in the browser and offline. Each read tries one color channel and tilt
    correction, sharpens the image and keeps only text shaped like a student number
    (nine digits starting with 19 or 20). Blue comes first because it separates pale
    text from red ID backgrounds best. The same number has to be read twice within 30 seconds.
-2. **Knows how OCR fails.** `server/matcher.js` holds a confusion matrix,
+2. **Knows how OCR fails.** `server/intelligence/matcher.js` holds a confusion matrix,
    P(read digit | true digit), plus chances of a dropped or extra digit. It
    starts from general OCR knowledge (8 and 3, 1 and 7, 5 and 6 get swapped
    far more than 1 and 0).
@@ -166,8 +187,8 @@ how often the right student was ranked first, and the misreads it has learned.
 ### Evaluating it
 
 ```bash
-npm test          # unit tests for the matcher
-npm run eval      # matcher vs. plain edit distance on a simulated venue
+python run.py test   # unit tests (or: npm test)
+npm run eval         # matcher vs. plain edit distance on a simulated venue
 ```
 
 `npm run eval` builds 2,000 students on file and a 300-guest event, simulates
@@ -204,7 +225,7 @@ logistics questions: how many of the people registered will actually come, and
 how many people can come in off the waitlist without anyone being turned away
 at the door. Free student events lose a lot of registrants (about 4 in 10 in the
 simulated history), so a "full" event usually has empty seats while its
-waitlist waits. The code is `server/forecast.js`.
+waitlist waits. The code is `server/intelligence/forecast.js`.
 
 1. **Learns from past events.** Every registration at a finished event is a
    labelled example: they checked in or they didn't. A logistic regression,
@@ -298,37 +319,49 @@ ignored until it has been out of view for a minute.
 ## Project layout
 
 ```
+run.py                 one command: installs once, then starts the app
+vite.config.js         Vite setup (root is client/); also copies the OCR assets and mounts the API in npm run dev
+.env                   SUPABASE_URL and SUPABASE_SERVICE_KEY (ignored by git; see .env.example)
 server/
   index.js             venue server: serves dist/ and the API (npm start)
-  plugin.js            mounts the API into Vite for npm run dev / preview
-  api.js               logical layer: registration, waitlist, check-in rules
-  matcher.js           intelligent component: Bayesian OCR matching and learning
-  matcher.test.js      unit tests for the matcher (npm test)
-  forecast.js          intelligent component: turnout forecast and waitlist release
-  forecast.test.js     unit tests for the forecast (npm test)
-  simulate.js          simulated event history, for the demo data and the evaluation
-  store.js             physical layer: the JSON data file, atomic writes
-  seed.js              demo events, past history and student directory for the first run
-src/
-  SELAE_Frontend.jsx   routing, the organizer console, scanner modal, photos
-  public.jsx           top bar, notifications, events, discover, slide-over,
-                       event page, registration, ticket, create event
-  shared.jsx           design system (styles), sky covers, barcodes, formatting, QR code
-  camera.jsx           webcam access, beeps, hold-to-exit
-  ocr.js               OCR of the printed student number (Tesseract), with glare correction
-  forecast.jsx         turnout forecast panel, waitlist release, turnout model panel
-  images.js            resizes photos in the browser before upload
-  api.js               client for the server API; host keys and tickets per device
+  api.js               logical layer: registration, waitlist, check-in rules, uploads, notifications
+  intelligence/
+    matcher.js         intelligent component: Bayesian OCR matching and learning
+    forecast.js        intelligent component: turnout forecast and waitlist release
+  storage/
+    store.js           physical layer: picks Supabase or the JSON data file; atomic file writes
+    supabase.js        Supabase store: one table per collection, photos in Storage, changed rows only
+    supabase.sql       the tables and bucket to create once in the Supabase SQL editor
+  seed/
+    seed.js            demo events, past history and student directory for the first run
+    simulate.js        simulated event history, for the demo data and the evaluation
+  tests/               unit tests for the matcher, forecast, API and store (npm test)
+  eval/
+    eval-matcher.js    evaluation: matcher vs. edit distance, threshold sweep (npm run eval)
+    eval-turnout.js    evaluation: forecast vs. simpler predictors and release rules (npm run eval:turnout)
+client/
+  index.html           the page shell
   main.jsx             entry point
-scripts/
-  eval-matcher.js      evaluation: matcher vs. edit distance, threshold sweep (npm run eval)
-  eval-turnout.js      evaluation: forecast vs. simpler predictors and release rules (npm run eval:turnout)
+  index.css            Tailwind
+  pages/
+    SELAE_Frontend.jsx routing, the organizer console, scanner modal, photos
+    public.jsx         top bar, notifications, events, discover, slide-over, event page,
+                       registration, ticket, create event
+  components/
+    shared.jsx         design system (styles), sky covers, barcodes, formatting, QR code, photo resizing
+    camera.jsx         webcam access, beeps, hold-to-exit
+    forecast.jsx       turnout forecast panel, waitlist release, turnout model panel
+  lib/
+    api.js             client for the server API; host keys and tickets per device
+    ocr.js             OCR of the printed student number (Tesseract), with glare correction
+  public/tesseract/    OCR worker, engine and model, copied from node_modules (ignored by git)
+data/                  the local JSON data file and uploads, when Supabase isn't configured (ignored by git)
 ```
 
 ## Stack
 
 - React + Vite, Tailwind CSS 4
-- A small Node server (no framework) with a JSON data file
+- A small Node server (no framework); data in Supabase (Postgres + Storage) or a JSON file
 - recharts for charts, lucide-react for icons
 - zxing-wasm (zxing-cpp compiled to WebAssembly) for decoding; bundled with the
   app, so scanning works offline
@@ -356,5 +389,5 @@ scripts/
 This prototype exists to settle the interface and the rules before the Java
 version is written. JavaFX is the closest match for the organizer console, and
 the original ZXing library (`com.google.zxing`) covers QR and barcode decoding.
-Tess4J does the OCR there, and `server/matcher.js` and `server/forecast.js` have
+Tess4J does the OCR there, and `server/intelligence/matcher.js` and `forecast.js` have
 no dependencies, so they port to Java line for line.

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Area } from "recharts";
 import { Brain, TrendingUp, TrendingDown, UserPlus } from "lucide-react";
-import { forecastNow } from "../server/forecast.js";
-import { api } from "./api.js";
+import { forecastNow } from "../../server/intelligence/forecast.js";
+import { api } from "../lib/api.js";
 import { pct, formatName } from "./shared.jsx";
 
 /* Turnout forecast and waitlist release */

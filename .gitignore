@@ -7,4 +7,6 @@ npm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 data
-public/tesseract
+client/public/tesseract
+__pycache__
+.env

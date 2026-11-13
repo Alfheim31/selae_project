@@ -4,12 +4,11 @@ import {
   Hammer, Mic, CodeXml, BookOpen, Briefcase, PartyPopper, Trophy, Sparkles, ImagePlus, Trash2, ChevronLeft, ChevronRight,
   ArrowUpRight, Images, Megaphone, PlaneTakeoff, BellRing, UserPlus, Upload,
 } from "lucide-react";
-import { api, myTickets, follows, seen } from "./api.js";
-import { prepareImage } from "./images.js";
+import { api, myTickets, follows, seen } from "../lib/api.js";
 import {
   Cover, Mark, QrCode, Barcode, Trails, go, fmtTime, fmtDate, fmtRange, formatName, tidyName, tidyInitial, COLORS, COLOR_NAMES,
-  skyOf, flightNo,
-} from "./shared.jsx";
+  skyOf, flightNo, prepareImage,
+} from "../components/shared.jsx";
 
 /* Public pages */
 
@@ -710,7 +709,7 @@ export function EventPage({ id }) {
   );
 }
 
-const SUFFIXES = ["", "Jr.", "Sr.", "II", "III", "IV"];
+export const SUFFIXES = ["", "Jr.", "Sr.", "II", "III", "IV"];
 
 function RegisterForm({ event }) {
   const [f, setF] = useState({ first: "", middle: "", last: "", suffix: "", studentId: "", section: "", email: "" });

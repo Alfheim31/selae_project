@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   fitLogistic, predictRaw, poissonBinomial, stillComing, arrivedShare, forecastNow, buildExamples, trainTurnout, predictEvent, auc,
-} from "./forecast.js";
-import { buildSeed } from "./seed.js";
+} from "../intelligence/forecast.js";
+import { buildSeed } from "../seed/seed.js";
 
 test("logistic regression recovers the direction of each effect", () => {
   let a = 42;

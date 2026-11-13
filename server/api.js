@@ -1,9 +1,9 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { newCode, newId, hashKey } from "./seed.js";
-import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./matcher.js";
-import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./forecast.js";
+import { newCode, newId, hashKey } from "./seed/seed.js";
+import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./intelligence/matcher.js";
+import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./intelligence/forecast.js";
 
 /* Logical layer */
 
@@ -105,6 +105,27 @@ function eventFields(body, existing = {}) {
   if (has("registrationOpen")) out.registrationOpen = Boolean(body.registrationOpen);
   if (has("category") || !existing.category) out.category = CATEGORIES.includes(body.category) ? body.category : "General";
   return out;
+}
+
+function studentFields(b) {
+  const m = String(b.studentId || "").trim().match(STUDENT_ID);
+  if (!m) fail(400, "Student number should look like 2024-12345.");
+  const first = tidyName(str(b.first, "Given name", { max: 60 }));
+  const last = tidyName(str(b.last, "Surname", { max: 60 }));
+  const middle = tidyInitial(b.middle);
+  const suffix = SUFFIXES.includes(b.suffix) ? b.suffix : "";
+  const section = str(b.section, "Section", { max: 30 }).toUpperCase().replace(/\s+/g, " ");
+  return { id: `${m[1]}-${m[2]}`, last, first, middle, suffix, section };
+}
+
+function addRegistration(d, event, student, extra = {}) {
+  // The first entry stays; the name typed here only goes on this ticket
+  if (!d.directory[student.id]) d.directory[student.id] = student;
+  const going = counts(d, event.id).going;
+  const reg = { id: newId(), eventId: event.id, code: newCode(), studentId: student.id, student, email: "", status: going < event.capacity ? "going" : "waitlist",
+    createdAt: new Date().toISOString(), checkin: null, ...extra };
+  d.registrations.push(reg);
+  return reg;
 }
 
 /* ---------- check-in rules ---------- */
@@ -359,12 +380,11 @@ export function createApi(store) {
   const findEvent = (id) => store.data.events.find((e) => e.id === id) || fail(404, "Event not found.");
   const saveUpload = (prefix, { buf, ext }) => {
     const name = `${prefix}-${newId()}.${ext}`.toLowerCase().replace(/[^a-z0-9.-]/g, "-");
-    fs.writeFileSync(path.join(store.uploadsDir, name), buf);
-    return `/uploads/${name}`;
+    return store.putUpload(name, buf, UPLOAD_TYPES[ext]);
   };
   const removeUpload = (url) => {
-    const name = String(url || "").replace(/^\/uploads\//, "");
-    if (UPLOAD_NAME.test(name)) fs.rm(path.join(store.uploadsDir, name), { force: true }, () => {});
+    const name = String(url || "").split("/").pop();
+    if (UPLOAD_NAME.test(name)) store.removeUpload(name);
   };
   const registerHits = new Map();
   const limitRegistrations = (req) => {
@@ -418,7 +438,7 @@ export function createApi(store) {
     ["POST", /^\/api\/events\/([\w-]+)\/cover$/, async (req, [id]) => {
       const event = findEvent(id);
       requireManage(req, event);
-      const url = saveUpload(`${id}-cover`, await readImage(req));
+      const url = await saveUpload(`${id}-cover`, await readImage(req));
       const old = event.coverImage;
       store.mutate(() => { event.coverImage = url; });
       removeUpload(old);
@@ -439,7 +459,7 @@ export function createApi(store) {
       requireManage(req, event);
       if (Date.now() < new Date(event.endsAt).getTime()) fail(409, "Photos open once the event has ended.");
       if ((event.photos || []).length >= MAX_PHOTOS) fail(409, `An event can have up to ${MAX_PHOTOS} photos.`);
-      const url = saveUpload(`${id}-photo`, await readImage(req));
+      const url = await saveUpload(`${id}-photo`, await readImage(req));
       const photo = { id: newId(), url, uploadedAt: new Date().toISOString() };
       store.mutate(() => { event.photos = [...(event.photos || []), photo]; });
       return photo;
@@ -465,14 +485,8 @@ export function createApi(store) {
       if (!pub.registrationOpen) fail(409, pub.isPast ? "This event has already ended." : "Registration is closed for this event.");
       if (!pub.canManage) limitRegistrations(req);
       const b = await readBody(req);
-      const m = String(b.studentId || "").trim().match(STUDENT_ID);
-      if (!m) fail(400, "Student number should look like 2024-12345.");
-      const studentId = `${m[1]}-${m[2]}`;
-      const first = tidyName(str(b.first, "Given name", { max: 60 }));
-      const last = tidyName(str(b.last, "Surname", { max: 60 }));
-      const middle = tidyInitial(b.middle);
-      const suffix = SUFFIXES.includes(b.suffix) ? b.suffix : "";
-      const section = str(b.section, "Section", { max: 30 }).toUpperCase().replace(/\s+/g, " ");
+      const student = studentFields(b);
+      const studentId = student.id;
       const email = str(b.email, "Email", { max: 120, required: false });
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
 
@@ -484,14 +498,21 @@ export function createApi(store) {
       }
 
       return store.mutate((d) => {
-        // The first entry stays; the name typed here only goes on this ticket
-        const student = { id: studentId, last, first, middle, suffix, section };
-        if (!d.directory[studentId]) d.directory[studentId] = student;
-        const going = counts(d, id).going;
-        const reg = { id: newId(), eventId: id, code: newCode(), studentId, student, email, status: going < event.capacity ? "going" : "waitlist",
-          createdAt: new Date().toISOString(), checkin: null };
-        d.registrations.push(reg);
+        const reg = addRegistration(d, event, student, { email });
         return { existing: false, ticket: ticketView(d, req, reg) };
+      });
+    }],
+
+    // Student added at the gate, even after registration closes
+    ["POST", /^\/api\/events\/([\w-]+)\/walkin$/, async (req, [id]) => {
+      const event = findEvent(id);
+      requireManage(req, event);
+      const b = await readBody(req);
+      const student = studentFields(b);
+      return store.mutate((d) => {
+        const known = d.registrations.some((r) => r.eventId === id && r.studentId === student.id && r.status !== "cancelled");
+        if (!known) addRegistration(d, event, student, { walkIn: true });
+        return { ...checkIn(d, event, { studentId: student.id, method: "manual", scanId: b.scanId }, isLocal(req)), added: !known };
       });
     }],
 
@@ -610,8 +631,10 @@ export function createApi(store) {
     if (upload && req.method === "GET") {
       let name = "";
       try { name = decodeURIComponent(upload[1]); } catch { /* bad encoding: 404 below */ }
+      if (!UPLOAD_NAME.test(name)) { res.statusCode = 404; res.end(); return true; }
+      if (!store.uploadsDir) { res.statusCode = 302; res.setHeader("Location", store.uploadUrl(name)); res.end(); return true; }
       const file = path.join(store.uploadsDir, name);
-      if (!UPLOAD_NAME.test(name) || !fs.existsSync(file)) { res.statusCode = 404; res.end(); return true; }
+      if (!fs.existsSync(file)) { res.statusCode = 404; res.end(); return true; }
       res.setHeader("Content-Type", UPLOAD_TYPES[name.split(".").pop()]);
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.statusCode = 500; res.end(); }).pipe(res);

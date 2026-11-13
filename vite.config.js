@@ -3,12 +3,13 @@ import path from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { selaeApi } from './server/plugin.js'
+import { connectStore } from './server/storage/store.js'
+import { createApi } from './server/api.js'
 
 // Offline OCR assets
 function tesseractAssets() {
   const copy = () => {
-    const out = path.resolve('public/tesseract')
+    const out = path.resolve('client/public/tesseract')
     const files = [
       ['node_modules/tesseract.js/dist/worker.min.js', 'worker.min.js'],
       ...fs.readdirSync('node_modules/tesseract.js-core')
@@ -26,7 +27,19 @@ function tesseractAssets() {
   return { name: 'tesseract-assets', config: copy }
 }
 
+// API inside the dev and preview servers
+function selaeApi() {
+  let handle
+  const mount = async (server) => {
+    handle = handle || createApi(await connectStore())
+    server.middlewares.use((req, res, next) => { handle(req, res, next).catch(next) })
+  }
+  return { name: 'selae-api', configureServer: mount, configurePreviewServer: mount }
+}
+
 export default defineConfig({
+  root: 'client',
+  build: { outDir: '../dist', emptyOutDir: true },
   plugins: [tesseractAssets(), react(), tailwindcss(), selaeApi()],
   // LAN access
   server: { host: true },

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { openStore } from "./store.js";
+import { connectStore } from "./storage/store.js";
 import { createApi } from "./api.js";
 
 /* Venue server */
@@ -11,7 +11,7 @@ import { createApi } from "./api.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 const PORT = Number(process.env.PORT) || 8080;
-const store = openStore(process.env.SELAE_DATA || path.join(root, "data/selae.json"));
+const store = await connectStore();
 const api = createApi(store);
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm",
@@ -44,5 +44,5 @@ http.createServer(async (req, res) => {
   console.log(`  Organizer (this laptop, camera works here):  http://localhost:${PORT}`);
   for (const list of Object.values(os.networkInterfaces()))
     for (const a of list || []) if (a.family === "IPv4" && !a.internal) console.log(`  Phones on the same Wi-Fi:                     http://${a.address}:${PORT}`);
-  console.log(`\n  Data file: ${store.file}\n`);
+  console.log(`\n  Data: ${store.file}\n`);
 });

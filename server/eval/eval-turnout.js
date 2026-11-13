@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* Evaluates the turnout forecast and waitlist release */
 import crypto from "node:crypto";
-import { rng, makeWorld, simulateHistory, trueShowProb } from "../server/simulate.js";
-import { trainTurnout, predictEvent, forecastNow, auc, brier, logLoss } from "../server/forecast.js";
+import { rng, makeWorld, simulateHistory, trueShowProb } from "../seed/simulate.js";
+import { trainTurnout, predictEvent, forecastNow, auc, brier, logLoss } from "../intelligence/forecast.js";
 
 
 
