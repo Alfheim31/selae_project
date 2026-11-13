@@ -1,4 +1,5 @@
 /* Talks to the SELAE server */
+import { accessToken } from "./auth.js";
 
 const KEYS = "selae.hostKeys";
 const TICKETS = "selae.tickets";
@@ -46,6 +47,8 @@ async function upload(path, blob) {
   const keys = Object.values(hostKeys.all());
   const headers = { "Content-Type": blob.type || "image/jpeg" };
   if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
+  const token = await accessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   let res;
   try { res = await fetch(path, { method: "POST", headers, body: blob }); } catch {
     throw new Error("Can't reach the SELAE server to upload. Check the Wi-Fi and try again.");
@@ -61,6 +64,8 @@ async function request(method, path, body) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
+  const token = await accessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   let res;
   try {
     res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -75,6 +80,15 @@ async function request(method, path, body) {
 
 export const api = {
   info: () => request("GET", "/api/info"),
+  me: () => request("GET", "/api/me"),
+  saveProfile: (body) => request("PUT", "/api/me/profile", body),
+  orgMembers: () => request("GET", "/api/org/members"),
+  inviteOfficer: (email) => request("POST", "/api/org/members", { email }),
+  removeOfficer: (id) => request("DELETE", `/api/org/members/${id}`),
+  answerInvite: (id, choice) => request("POST", `/api/me/invites/${id}/${choice}`),
+  adminOrgs: () => request("GET", "/api/admin/orgs"),
+  createOrg: (body) => request("POST", "/api/admin/orgs", body),
+  updateOrg: (id, body) => request("PATCH", `/api/admin/orgs/${id}`, body),
   events: () => request("GET", "/api/events"),
   event: (id) => request("GET", `/api/events/${id}`),
   async create(fields) {
@@ -83,8 +97,9 @@ export const api = {
     return out.event;
   },
   update: (id, fields) => request("PATCH", `/api/events/${id}`, fields),
-  async register(id, fields) {
-    const out = await request("POST", `/api/events/${id}/register`, fields);
+  // Uses the signed-in student's profile
+  async register(id) {
+    const out = await request("POST", `/api/events/${id}/register`, {});
     myTickets.add(out.ticket.code, id);
     return out;
   },

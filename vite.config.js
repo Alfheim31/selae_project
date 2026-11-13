@@ -53,6 +53,7 @@ function selaeApi() {
 
 export default defineConfig({
   root: 'client',
+  envDir: path.resolve('.'),
   build: { outDir: '../dist', emptyOutDir: true },
   plugins: [tesseractAssets(), react(), tailwindcss(), selaeApi()],
   // LAN access
