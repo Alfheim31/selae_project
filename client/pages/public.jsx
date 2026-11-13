@@ -9,9 +9,11 @@ import {
   Cover, Mark, QrCode, Barcode, Trails, go, fmtTime, fmtDate, fmtRange, formatName, tidyName, tidyInitial, COLORS, COLOR_NAMES,
   skyOf, flightNo, prepareImage,
 } from "../components/shared.jsx";
-import { Camera } from "lucide-react";
+import { Camera, LogIn, Mail, Eye, EyeOff } from "lucide-react";
+import { signIn, signOut, useSession, passwordSignIn, passwordSignUp, verifyEmailCode, resendEmailCode } from "../lib/auth.js";
 import { useCamera } from "../components/camera.jsx";
 import { extractFaceDescriptor } from "../lib/face.js";
+import { OfficersPanel, InvitesPanel } from "./org.jsx";
 
 /* Public pages */
 
@@ -39,12 +41,351 @@ export function TopBar({ route }) {
         <div className="flex items-center gap-2">
           <LiveClock />
           <NotificationBell />
+          <AccountButton />
           <button className="btn btn-primary btn-sm" onClick={() => go("create")} style={{ height: 40 }}>
             <Plus size={17} /><span className="hidden sm:inline">Create event</span>
           </button>
         </div>
       </div>
     </header>
+  );
+}
+
+// The signed-in account as SELAE sees it (role, profile). undefined while loading, null when signed out.
+export function useMe() {
+  const session = useSession();
+  const uid = session ? session.user.id : session;
+  const [me, setMe] = useState(undefined);
+  const reload = useCallback(async () => {
+    try { setMe((await api.me()).user); } catch { setMe(null); }
+  }, []);
+  useEffect(() => {
+    if (uid === undefined) return;
+    if (uid === null) { setMe(null); return; }
+    setMe(undefined);
+    reload();
+  }, [uid, reload]);
+  return { me, reload, session };
+}
+
+function AccountButton() {
+  const session = useSession();
+  if (session === undefined) return null;
+  if (!session) {
+    return (
+      <button className="btn btn-sm" onClick={() => go("profile")} style={{ height: 40 }}>
+        <LogIn size={17} /><span className="hidden sm:inline">Sign in</span>
+      </button>
+    );
+  }
+  const meta = session.user.user_metadata || {};
+  const first = String(meta.full_name || meta.name || session.user.email).split(" ")[0];
+  return (
+    <button className="btn btn-sm" onClick={() => go("profile")} title={`Signed in as ${session.user.email}`} style={{ height: 40, gap: 8 }}>
+      <Avatar meta={meta} name={first} size={26} />
+      <span className="hidden sm:inline">{first}</span>
+    </button>
+  );
+}
+
+function Avatar({ meta, name, size }) {
+  if (meta.avatar_url) return <img src={meta.avatar_url} alt="" referrerPolicy="no-referrer" style={{ width: size, height: size, borderRadius: "50%" }} />;
+  return <span aria-hidden="true">{String(name || "?")[0]}</span>;
+}
+
+const ROLE_LABEL = { superadmin: "Superadmin", org: "Organization account", student: "Student" };
+
+/* ---------------- profile: filled in once, used for every event ---------------- */
+export function ProfilePage() {
+  const { me, reload, session } = useMe();
+  const signOutHere = async () => { await signOut(); go(""); };
+
+  if (me === undefined) return <div className="narrow py-10 muted">Loading your account…</div>;
+  if (!me) return <div className="narrow py-10"><AuthForm /></div>;
+
+  const meta = (session && session.user.user_metadata) || {};
+  const back = returnTo.get();
+  const ready = me.role !== "student" || (me.profile && me.profile.hasFace);
+  return (
+    <div className="narrow py-10 flex flex-col gap-4">
+      {back && ready && (
+        <div className="panel p-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: "var(--accent)" }}>
+          <span className="text-sm">{me.role === "student" ? "You're all set. Go back to the event to register." : "Go back to where you were."}</span>
+          <button className="btn btn-primary btn-sm" onClick={() => { returnTo.clear(); go(back); }}>Back to the event</button>
+        </div>
+      )}
+      <div className="panel p-5 flex items-center gap-4">
+        <Avatar meta={meta} name={me.name || me.email} size={52} />
+        <div className="min-w-0 flex-1">
+          <div style={{ fontWeight: 700, fontSize: "1.15rem" }}>{me.name || me.email}</div>
+          <div className="muted text-sm" style={{ overflowWrap: "anywhere" }}>{me.email}</div>
+          <div className="text-sm" style={{ marginTop: 2 }}>
+            {ROLE_LABEL[me.role]}{me.org ? ` · ${me.org.name}` : ""}
+            {(me.officerOf || []).map((o) => <span key={o.id} className="pill host" style={{ marginLeft: 8 }}>Officer · {o.name}</span>)}
+          </div>
+        </div>
+        <button className="btn btn-sm" onClick={signOutHere}>Sign out</button>
+      </div>
+      {me.role === "student" ? <><InvitesPanel me={me} onChange={reload} /><ProfileForm me={me} onSaved={reload} /></>
+        : me.role === "org" ? <OfficersPanel />
+        : (
+          <button className="panel p-5 flex items-center justify-between gap-3" onClick={() => go("admin")} style={{ textAlign: "left", cursor: "pointer" }}>
+            <span>
+              <span style={{ display: "block", fontWeight: 700 }}>Organizations</span>
+              <span className="muted text-sm">Add, edit, and disable the organizations that host events.</span>
+            </span>
+            <ChevronRight size={20} />
+          </button>
+        )}
+    </div>
+  );
+}
+
+const EMPTY_STUDENT = { first: "", middle: "", last: "", suffix: "", studentId: "", section: "" };
+
+// Details typed at sign-up wait here until the email is confirmed and the profile is saved
+const PENDING = "selae.pendingStudent";
+const pendingStudent = {
+  get(email) {
+    try {
+      const x = JSON.parse(localStorage.getItem(PENDING));
+      return x && x.email === String(email).toLowerCase() ? x.f : null;
+    } catch { return null; }
+  },
+  set(email, f) { try { localStorage.setItem(PENDING, JSON.stringify({ email: String(email).toLowerCase(), f })); } catch { /* private mode */ } },
+  clear() { try { localStorage.removeItem(PENDING); } catch { /* private mode */ } },
+};
+
+function StudentFields({ f, set }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label><span className="lbl">Given name</span><input className="inp" value={f.first} onChange={set("first")} autoComplete="given-name" required /></label>
+      <label><span className="lbl">Middle name or initial <span className="faint">(optional)</span></span><input className="inp" value={f.middle} onChange={set("middle")} autoComplete="additional-name" /></label>
+      <label><span className="lbl">Surname</span><input className="inp" value={f.last} onChange={set("last")} autoComplete="family-name" required /></label>
+      <label><span className="lbl">Suffix <span className="faint">(optional)</span></span>
+        <select className="inp" value={f.suffix} onChange={set("suffix")}>
+          {SUFFIXES.map((s) => <option key={s} value={s}>{s || "None"}</option>)}
+        </select>
+      </label>
+      <label><span className="lbl">Student number</span><input className="inp mono" value={f.studentId} onChange={set("studentId")} placeholder="2024-12345" inputMode="numeric" required /></label>
+      <label><span className="lbl">Section</span><input className="inp" value={f.section} onChange={set("section")} placeholder="BSCS 3-4" required /></label>
+    </div>
+  );
+}
+
+function AuthForm() {
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [code, setCode] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [f, setF] = useState(EMPTY_STUDENT);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const creating = mode === "signup";
+  const switchTo = (m) => { setMode(m); setError(""); setNotice(""); setCode(""); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(""); setNotice("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
+    if (password.length < 8) { setError("Password should be at least 8 characters."); return; }
+    if (creating) {
+      if (!f.first.trim() || !f.last.trim()) { setError("Enter your given name and surname."); return; }
+      if (!/^\d{4}\s*-?\s*\d{5}$/.test(f.studentId.trim())) { setError("Student number should look like 2024-12345."); return; }
+      if (!f.section.trim()) { setError("Enter your section."); return; }
+      pendingStudent.set(email.trim(), f);
+    }
+    setBusy(true);
+    try {
+      // On success the session changes and this page shows the profile
+      if (!creating) await passwordSignIn(email.trim(), password);
+      else if (await passwordSignUp(email.trim(), password)) switchTo("verify");
+    } catch (err) {
+      if (err.unconfirmed) {
+        switchTo("verify");
+        try { await resendEmailCode(email.trim()); } catch { /* the earlier code may still work */ }
+      } else setError(err.message);
+    }
+    setBusy(false);
+  };
+
+  const verify = async (e) => {
+    e.preventDefault();
+    setError(""); setNotice("");
+    if (!/^\d{6,10}$/.test(code.trim())) { setError("Enter the code from the email."); return; }
+    setBusy(true);
+    try { await verifyEmailCode(email.trim(), code.trim()); } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+
+  const resend = async () => {
+    setError(""); setNotice("");
+    try { await resendEmailCode(email.trim()); setNotice("New code sent."); } catch (err) { setError(err.message); }
+  };
+
+  if (mode === "verify") {
+    return (
+      <AuthCard>
+        <form onSubmit={verify} className="flex flex-col gap-4" noValidate>
+          <div className="flex flex-col items-center gap-2" style={{ textAlign: "center" }}>
+            <span className="authicon"><Mail size={24} /></span>
+            <h1 className="panel-title">Check your email</h1>
+            <p className="muted text-sm">
+              We sent a code to <strong style={{ color: "var(--text)", overflowWrap: "anywhere" }}>{email.trim()}</strong>.
+              Enter it below to confirm it's yours. If you don't see it, check your spam folder.
+            </p>
+          </div>
+          <input className="inp mono" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} inputMode="numeric"
+            aria-label="Code from the email" autoComplete="one-time-code" maxLength={10} placeholder="••••••" autoFocus required
+            style={{ fontSize: "1.6rem", letterSpacing: ".4em", textAlign: "center", padding: ".7rem" }} />
+          {error && <ErrorBox message={error} />}
+          {notice && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600, textAlign: "center" }}>{notice}</p>}
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ padding: ".75rem 1rem" }}>
+            {busy ? "Checking…" : "Confirm email"}
+          </button>
+          <div className="flex justify-center gap-2 flex-wrap">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Send a new code</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => switchTo("signup")}>Use a different email</button>
+          </div>
+        </form>
+      </AuthCard>
+    );
+  }
+
+  return (
+    <AuthCard wide={creating}>
+      <div className="flex flex-col items-center gap-2" style={{ textAlign: "center" }}>
+        <span className="authicon"><Mark /></span>
+        <h1 className="panel-title">{creating ? "Create your account" : "Welcome back"}</h1>
+        <p className="muted text-sm" style={{ maxWidth: 400 }}>{creating
+          ? "Enter your student details once. After you confirm your email, scan your face and you're set for every event."
+          : "Sign in to register for events in one tap."}</p>
+      </div>
+
+      <div className="seg" role="group" aria-label="Account" style={{ display: "flex" }}>
+        <button type="button" aria-pressed={!creating} style={{ flex: 1, padding: ".5rem" }} onClick={() => switchTo("signin")}>Sign in</button>
+        <button type="button" aria-pressed={creating} style={{ flex: 1, padding: ".5rem" }} onClick={() => switchTo("signup")}>Create account</button>
+      </div>
+
+      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+        {creating && (
+          <>
+            <div className="authsec">Student details</div>
+            <StudentFields f={f} set={set} />
+            <div className="authsec">Account</div>
+          </>
+        )}
+        <label><span className="lbl">Email</span>
+          <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+            placeholder="you@gmail.com" required />
+        </label>
+        <label><span className="lbl">Password {creating && <span className="faint">(at least 8 characters)</span>}</span>
+          <span style={{ position: "relative", display: "block" }}>
+            <input className="inp" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+              autoComplete={creating ? "new-password" : "current-password"} required style={{ paddingRight: "2.8rem" }} />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPw((x) => !x)}
+              aria-label={showPw ? "Hide password" : "Show password"}
+              style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", padding: ".3rem .45rem" }}>
+              {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </span>
+        </label>
+        {error && <ErrorBox message={error} />}
+        {notice && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600 }}>{notice}</p>}
+        <button className="btn btn-primary" type="submit" disabled={busy} style={{ padding: ".75rem 1rem" }}>
+          {busy ? "Please wait…" : creating ? "Create account" : "Sign in"}
+        </button>
+      </form>
+
+      <div className="flex items-center gap-3 faint text-sm">
+        <span style={{ flex: 1, height: 1, background: "var(--line)" }} />or<span style={{ flex: 1, height: 1, background: "var(--line)" }} />
+      </div>
+      <button type="button" className="btn" onClick={signIn} style={{ padding: ".7rem 1rem" }}>
+        <GoogleG /> Continue with Google
+      </button>
+      <p className="text-xs faint" style={{ textAlign: "center" }}>Organization and admin accounts sign in with Google.</p>
+    </AuthCard>
+  );
+}
+
+function AuthCard({ wide, children }) {
+  return (
+    <div className="panel flex flex-col gap-5" style={{ maxWidth: wide ? 640 : 440, margin: "0 auto", padding: "2rem 1.5rem" }}>
+      <style>{`
+        .authicon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+          background:var(--accent-soft);color:var(--accent)}
+        .authsec{font-weight:700;font-size:.95rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+      `}</style>
+      {children}
+    </div>
+  );
+}
+
+function GoogleG() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+  );
+}
+
+function ProfileForm({ me, onSaved }) {
+  const p = me.profile;
+  const [f, setF] = useState(() => {
+    if (p) return { first: p.first, middle: p.middle, last: p.last, suffix: p.suffix, studentId: p.studentId, section: p.section };
+    return pendingStudent.get(me.email) || EMPTY_STUDENT;
+  });
+  const fromSignUp = !p && Boolean(pendingStudent.get(me.email));
+  const [faceDescriptor, setFaceDescriptor] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const set = (k) => (e) => { setDone(false); setF((x) => ({ ...x, [k]: e.target.value })); };
+  const hasFace = Boolean(faceDescriptor || (p && p.hasFace));
+  const preview = useMemo(() => {
+    const s = { first: tidyName(f.first), last: tidyName(f.last), middle: tidyInitial(f.middle), suffix: f.suffix };
+    return s.first && s.last ? formatName(s) : "";
+  }, [f]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!hasFace) { setError("Please complete the facial scan before saving."); return; }
+    setBusy(true); setError(""); setDone(false);
+    try {
+      await api.saveProfile({ ...f, faceDescriptor });
+      pendingStudent.clear();
+      setFaceDescriptor(null);
+      setDone(true);
+      onSaved();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="panel p-5 flex flex-col gap-4" noValidate>
+      <div>
+        <h1 className="panel-title">{p ? "Your student profile" : fromSignUp ? "Almost done: scan your face" : "Set up your student profile"}</h1>
+        <p className="muted text-sm">{fromSignUp
+          ? "Your email is confirmed. Check your details, scan your face, and save."
+          : "Fill this in once. SELAE uses it every time you register for an event."}</p>
+      </div>
+      <StudentFields f={f} set={set} />
+
+      <FaceCapture value={faceDescriptor} onChange={(d) => { setDone(false); setFaceDescriptor(d); }} onError={setError} saved={Boolean(p && p.hasFace)} />
+
+      {preview && <p className="text-sm muted">Guest lists will show you as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}
+      {error && <ErrorBox message={error} />}
+      {done && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600 }}>Saved.</p>}
+      <button className="btn btn-primary" type="submit" disabled={busy || !hasFace} style={{ padding: ".75rem 1rem", fontSize: "1.1rem" }}>
+        {busy ? "Saving…" : "Save profile"}
+      </button>
+    </form>
   );
 }
 
@@ -160,7 +501,7 @@ function usePolled(load, deps, ms) {
 function Loading() {
   return <div className="flex justify-center py-16"><div className="spin" aria-label="Loading" /></div>;
 }
-function ErrorBox({ message }) {
+export function ErrorBox({ message }) {
   return <div className="alert err" role="alert">{message}</div>;
 }
 
@@ -714,40 +1055,30 @@ export function EventPage({ id }) {
 
 export const SUFFIXES = ["", "Jr.", "Sr.", "II", "III", "IV"];
 
-function RegisterForm({ event }) {
-  const [f, setF] = useState({ first: "", middle: "", last: "", suffix: "", studentId: "", section: "", email: "" });
-  const [faceDescriptor, setFaceDescriptor] = useState(null);
-  const [faceStatus, setFaceStatus] = useState("Required: scan your face for fast gate entry.");
+// Face scan by webcam or selfie. `saved` means the profile already has a face.
+export function FaceCapture({ value, onChange, onError, saved = false }) {
+  const [faceStatus, setFaceStatus] = useState(saved ? "Face saved. Retake only if it stopped working at the gate." : "Required: scan your face for fast gate entry.");
   const [camOpen, setCamOpen] = useState(false);
   const [scanningFace, setScanningFace] = useState(false);
   const [camId, setCamId] = useState(null);
   const cam = useCamera(camOpen, camId);
   const fileInputRef = useRef(null);
 
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
-  const full = event.spotsLeft <= 0;
-  const preview = useMemo(() => {
-    const s = { first: tidyName(f.first), last: tidyName(f.last), middle: tidyInitial(f.middle), suffix: f.suffix };
-    return s.first && s.last ? formatName(s) : "";
-  }, [f]);
-
   const captureFromVideo = async () => {
     if (!cam.videoRef.current) return;
     setScanningFace(true);
-    setError("");
+    onError("");
     try {
       const res = await extractFaceDescriptor(cam.videoRef.current);
       if (!res) {
         setFaceStatus("No face detected. Center your face in good lighting and try again.");
       } else {
-        setFaceDescriptor(res.descriptor);
+        onChange(res.descriptor);
         setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
         setCamOpen(false);
       }
     } catch (err) {
-      setError("Failed to process face: " + err.message);
+      onError("Failed to process face: " + err.message);
     }
     setScanningFace(false);
   };
@@ -755,7 +1086,7 @@ function RegisterForm({ event }) {
   const captureFromFile = async (file) => {
     if (!file) return;
     setScanningFace(true);
-    setError("");
+    onError("");
     setFaceStatus("Analyzing photo…");
     try {
       const img = await new Promise((resolve, reject) => {
@@ -769,24 +1100,138 @@ function RegisterForm({ event }) {
       if (!res) {
         setFaceStatus("Couldn't detect a clear face in that photo. Try another selfie.");
       } else {
-        setFaceDescriptor(res.descriptor);
+        onChange(res.descriptor);
         setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
       }
     } catch (err) {
-      setError("Failed to process photo: " + err.message);
+      onError("Failed to process photo: " + err.message);
     }
     setScanningFace(false);
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!faceDescriptor) {
-      setError("Please complete the facial scan before registering.");
-      return;
-    }
+  return (
+    <div className="panel p-4 flex flex-col gap-3" style={{ background: "var(--raised)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="lbl" style={{ marginBottom: 2 }}>Facial registration (Required)</div>
+          <div className="text-sm" style={{ color: value || saved ? "var(--ok)" : "var(--muted)", fontWeight: value || saved ? 600 : 400 }}>
+            {faceStatus}
+          </div>
+          <p className="text-xs muted" style={{ marginTop: 6 }}>
+            By scanning, you agree that SELAE saves a face signature (a set of numbers made from your photo, not the photo itself)
+            so this event's hosts can recognize you at the entrance. Your photo never leaves your device.
+          </p>
+        </div>
+
+        {(value || saved) && <CheckCircle2 size={22} color="var(--ok)" />}
+      </div>
+
+      {camOpen && (
+        <div className="flex flex-col gap-2">
+          <div className="viewfinder" style={{ maxHeight: 280 }}>
+            <video ref={cam.videoRef} autoPlay playsInline muted />
+          </div>
+          {cam.devices.length > 1 && (
+            <select className="camselect" aria-label="Camera" value={camId || ""}
+              onChange={(e) => setCamId(e.target.value || null)} style={{ maxWidth: "100%" }}>
+              <option value="">Default camera</option>
+              {cam.devices.map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>
+              ))}
+            </select>
+          )}
+
+          {cam.state === "live" ? (
+            <div className="flex gap-2">
+              <button type="button" className="btn btn-primary btn-sm flex-1" disabled={scanningFace} onClick={captureFromVideo}>
+                <Camera size={15} /> {scanningFace ? "Scanning…" : "Capture face"}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCamOpen(false)}>Cancel</button>
+            </div>
+          ) : (
+            <p className="text-xs muted">
+              {cam.state === "insecure"
+                ? "Live camera requires localhost or HTTPS. Use the 'Take Selfie' button below instead."
+                : "Waiting for camera permission…"}
+            </p>
+          )}
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="user"
+        hidden
+        onChange={(e) => captureFromFile(e.target.files[0])}
+      />
+
+      {!camOpen && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => setCamOpen(true)}>
+            <Camera size={15} /> {value || saved ? "Retake via Webcam" : "Open Webcam"}
+          </button>
+          <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+            <Upload size={15} /> {scanningFace ? "Analyzing…" : value || saved ? "Retake Selfie (Phone)" : "Take Selfie (Phone / Upload)"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Where to go back to after signing in or finishing the profile
+const RETURN = "selae.returnTo";
+export const returnTo = {
+  set() { try { localStorage.setItem(RETURN, window.location.hash.replace(/^#\/?/, "")); } catch { /* private mode */ } },
+  get() { try { return localStorage.getItem(RETURN); } catch { return null; } },
+  clear() { try { localStorage.removeItem(RETURN); } catch { /* private mode */ } },
+};
+
+function RegisterForm({ event }) {
+  const { me } = useMe();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const full = event.spotsLeft <= 0;
+  const toProfile = () => { returnTo.set(); go("profile"); };
+
+  const heading = (
+    <div>
+      <h2 id="reg-h" className="panel-title">{full ? "Join the waitlist" : "Get your pass"}</h2>
+      <p className="muted text-sm">
+        {full ? "This event is full. When spots open up, people move to going in waitlist order."
+          : `${event.spotsLeft} of ${event.capacity} seats left.`}
+      </p>
+    </div>
+  );
+
+  if (me === undefined) return <div className="flex flex-col gap-4">{heading}<p className="muted text-sm">Loading…</p></div>;
+
+  let blocker = null;
+  if (!me) {
+    blocker = { text: "Sign in to register. Your student details and face are saved once, so it takes one tap.", action: "Sign in", icon: LogIn };
+  } else if (me.role !== "student") {
+    blocker = { text: "Organization and admin accounts can't register for events. Sign in with a student account." };
+  } else if (!me.profile || !me.profile.hasFace) {
+    blocker = { text: me.profile ? "Scan your face in your profile to finish setting it up, then come back here."
+      : "Set up your student profile first: your student number, name, section, and face.", action: "Finish my profile", icon: UserPlus };
+  }
+  if (blocker) {
+    return (
+      <div className="flex flex-col gap-4">
+        {heading}
+        <p className="text-sm">{blocker.text}</p>
+        {blocker.action && <button className="btn btn-primary" onClick={toProfile}><blocker.icon size={17} /> {blocker.action}</button>}
+      </div>
+    );
+  }
+
+  const p = me.profile;
+  const submit = async () => {
     setBusy(true); setError("");
     try {
-      const out = await api.register(event.id, { ...f, faceDescriptor });
+      const out = await api.register(event.id);
       go(`t/${out.ticket.code}`);
     } catch (err) {
       setError(err.message);
@@ -795,104 +1240,24 @@ function RegisterForm({ event }) {
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-      <div>
-        <h2 id="reg-h" className="panel-title">{full ? "Join the waitlist" : "Get your pass"}</h2>
-        <p className="muted text-sm">
-          {full ? "This event is full. When spots open up, people move to going in waitlist order."
-            : `${event.spotsLeft} of ${event.capacity} seats left. Takes about 20 seconds.`}
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label><span className="lbl">Given name</span><input className="inp" value={f.first} onChange={set("first")} autoComplete="given-name" required /></label>
-        <label><span className="lbl">Middle name or initial <span className="faint">(optional)</span></span><input className="inp" value={f.middle} onChange={set("middle")} autoComplete="additional-name" /></label>
-        <label><span className="lbl">Surname</span><input className="inp" value={f.last} onChange={set("last")} autoComplete="family-name" required /></label>
-        <label><span className="lbl">Suffix <span className="faint">(optional)</span></span>
-          <select className="inp" value={f.suffix} onChange={set("suffix")}>
-            {SUFFIXES.map((s) => <option key={s} value={s}>{s || "None"}</option>)}
-          </select>
-        </label>
-        <label><span className="lbl">Student number</span><input className="inp mono" value={f.studentId} onChange={set("studentId")} placeholder="2024-12345" inputMode="numeric" required /></label>
-        <label><span className="lbl">Section</span><input className="inp" value={f.section} onChange={set("section")} placeholder="BSCS 3-4" required /></label>
-        <label className="sm:col-span-2"><span className="lbl">Email <span className="faint">(optional)</span></span><input className="inp" type="email" value={f.email} onChange={set("email")} autoComplete="email" /></label>
-      </div>
-
-      {/* Facial Registration Block */}
-      <div className="panel p-4 flex flex-col gap-3" style={{ background: "var(--raised)" }}>
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <div className="lbl" style={{ marginBottom: 2 }}>Facial registration (Required)</div>
-            <div className="text-sm" style={{ color: faceDescriptor ? "var(--ok)" : "var(--muted)", fontWeight: faceDescriptor ? 600 : 400 }}>
-              {faceStatus}
-            </div>
-            <p className="text-xs muted" style={{ marginTop: 6 }}>
-              By scanning, you agree that SELAE saves a face signature (a set of numbers made from your photo, not the photo itself)
-              so this event's hosts can recognize you at the entrance. Your photo never leaves your device.
-            </p>
-          </div>
-
-          {faceDescriptor && <CheckCircle2 size={22} color="var(--ok)" />}
+    <div className="flex flex-col gap-4">
+      {heading}
+      <div className="panel p-4 flex flex-col gap-1" style={{ background: "var(--raised)" }}>
+        <div className="lbl" style={{ marginBottom: 2 }}>Registering as</div>
+        <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{formatName(p)}</div>
+        <div className="muted text-sm mono">{p.studentId} · {p.section}</div>
+        <div className="text-sm flex items-center gap-1" style={{ color: "var(--ok)", fontWeight: 600, marginTop: 4 }}>
+          <CheckCircle2 size={15} /> Face saved for fast entry
         </div>
-
-        {camOpen && (
-          <div className="flex flex-col gap-2">
-            <div className="viewfinder" style={{ maxHeight: 280 }}>
-              <video ref={cam.videoRef} autoPlay playsInline muted />
-            </div>
-            {cam.devices.length > 1 && (
-              <select className="camselect" aria-label="Camera" value={camId || ""}
-                onChange={(e) => setCamId(e.target.value || null)} style={{ maxWidth: "100%" }}>
-                <option value="">Default camera</option>
-                {cam.devices.map((d, i) => (
-                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>
-                ))}
-              </select>
-            )}
-
-            {cam.state === "live" ? (
-              <div className="flex gap-2">
-                <button type="button" className="btn btn-primary btn-sm flex-1" disabled={scanningFace} onClick={captureFromVideo}>
-                  <Camera size={15} /> {scanningFace ? "Scanning…" : "Capture face"}
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCamOpen(false)}>Cancel</button>
-              </div>
-            ) : (
-              <p className="text-xs muted">
-                {cam.state === "insecure"
-                  ? "Live camera requires localhost or HTTPS. Use the 'Take Selfie' button below instead."
-                  : "Waiting for camera permission…"}
-              </p>
-            )}
-          </div>
-        )}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="user"
-          hidden
-          onChange={(e) => captureFromFile(e.target.files[0])}
-        />
-
-        {!camOpen && (
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => setCamOpen(true)}>
-              <Camera size={15} /> {faceDescriptor ? "Retake via Webcam" : "Open Webcam"}
-            </button>
-            <button type="button" className="btn btn-sm" disabled={scanningFace} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
-              <Upload size={15} /> {scanningFace ? "Analyzing…" : faceDescriptor ? "Retake Selfie (Phone)" : "Take Selfie (Phone / Upload)"}
-            </button>
-          </div>
-        )}
       </div>
-
-      {preview && <p className="text-sm muted">On the guest list as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}
       {error && <ErrorBox message={error} />}
-      <button className="btn btn-primary" type="submit" disabled={busy || !faceDescriptor} style={{ padding: ".75rem 1rem", fontSize: "1.15rem" }}>
+      <button className="btn btn-primary" onClick={submit} disabled={busy} style={{ padding: ".75rem 1rem", fontSize: "1.15rem" }}>
         {busy ? "Registering…" : full ? "Join the waitlist" : "Register"}
       </button>
-    </form>
+      <p className="text-xs faint">
+        Not right? <button type="button" className="toplink" style={{ display: "inline", padding: 0, height: "auto", fontSize: "inherit" }} onClick={toProfile}>Edit your profile</button>
+      </p>
+    </div>
   );
 }
 
@@ -1024,11 +1389,11 @@ export function CoverPicker({ event, eventId, onChange, preview, onPick }) {
   );
 }
 
-export function EventForm({ initial, submitLabel, onSubmit, showRegistrationToggle = false, eventId, onCoverChange }) {
+export function EventForm({ initial, submitLabel, onSubmit, showRegistrationToggle = false, eventId, onCoverChange, orgs }) {
   const defaults = useMemo(() => {
     const s = new Date(); s.setDate(s.getDate() + 1); s.setHours(13, 0, 0, 0);
     const e = new Date(s.getTime() + 2 * 3600000);
-    return { title: "", hostName: "", venue: "", capacity: 100, description: "", color: "gold", visibility: "public", category: "Workshop",
+    return { title: "", hostName: "", orgId: orgs && orgs.length === 1 ? orgs[0].id : "", venue: "", capacity: 100, description: "", color: "gold", visibility: "public", category: "Workshop",
       registrationOpen: true, startsAt: toLocalInput(s), endsAt: toLocalInput(e) };
   }, []);
   const [f, setF] = useState(() => (initial
@@ -1049,7 +1414,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
     if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) { setError("Pick a start and end time."); setBusy(false); return; }
     try {
       await onSubmit({
-        title: f.title, hostName: f.hostName, venue: f.venue, description: f.description, color: f.color, visibility: f.visibility,
+        title: f.title, ...(orgs ? { orgId: f.orgId } : initial && initial.org ? {} : { hostName: f.hostName }), venue: f.venue, description: f.description, color: f.color, visibility: f.visibility,
         category: f.category, capacity: Number(f.capacity), startsAt: starts.toISOString(), endsAt: ends.toISOString(),
         ...(showRegistrationToggle ? { registrationOpen: f.registrationOpen } : {}),
       }, cover);
@@ -1083,7 +1448,17 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
             <input className="inp" style={{ fontSize: "1.35rem", fontFamily: "var(--f-display)", fontWeight: 700 }} value={f.title} onChange={set("title")} placeholder="GDG Study Jam: Intro to Flutter" required /></label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label><span className="lbl">Hosted by</span>
-              <input className="inp" value={f.hostName} onChange={set("hostName")} placeholder="Your org's name" /></label>
+              {orgs ? (
+                <select className="inp" value={f.orgId} onChange={set("orgId")} required>
+                  {orgs.length > 1 && <option value="">Choose an organization</option>}
+                  {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              ) : initial && initial.org ? (
+                <input className="inp" value={initial.org.name} disabled title="Events stay with the organization that hosts them" />
+              ) : (
+                <input className="inp" value={f.hostName} onChange={set("hostName")} placeholder="Your org's name" />
+              )}
+            </label>
             <label><span className="lbl">Category</span>
               <select className="inp" value={f.category} onChange={set("category")}>
                 {CATEGORIES.map(([k]) => <option key={k} value={k}>{k}</option>)}
@@ -1122,15 +1497,32 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
 }
 
 export function CreateEvent() {
+  const { me } = useMe();
+  if (me === undefined) return <div className="narrow py-10 muted">Loading…</div>;
+  const orgs = me ? me.hostsFor || [] : [];
+  if (!orgs.length) {
+    return (
+      <div className="narrow py-10">
+        <div className="panel p-6 flex flex-col gap-3">
+          <h1 className="panel-title">Events are hosted by organizations</h1>
+          <p className="muted">
+            {!me ? "Sign in with your organization's account, or as an officer, to create an event."
+              : "Only organization accounts and their officers can create events. Ask your organization to invite you as an officer."}
+          </p>
+          {!me && <div><button className="btn btn-primary" onClick={() => go("profile")}><LogIn size={17} /> Sign in</button></div>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="wrap py-8 flex flex-col gap-6" style={{ maxWidth: 920 }}>
       <div>
         <div className="tag mb-2">New departure</div>
         <h1 className="page-title">Create event</h1>
-        <p className="muted mt-3" style={{ maxWidth: "62ch" }}>You'll get a registration page to share and a scanner for check-in. Only this device can manage it, unless you share the co-host link.</p>
+        <p className="muted mt-3" style={{ maxWidth: "62ch" }}>You'll get a registration page to share and a scanner for check-in. Your organization's account and officers can manage it from any device.</p>
       </div>
       <div className="panel p-5 md:p-6">
-        <EventForm submitLabel="Create event" onSubmit={async (fields, cover) => {
+        <EventForm orgs={orgs} submitLabel="Create event" onSubmit={async (fields, cover) => {
           const e = await api.create(fields);
           if (cover) { try { await api.uploadCover(e.id, cover); } catch {/* ignore */} }
           go(`m/${e.id}`);

@@ -13,7 +13,8 @@ import {
   METHOD_LABEL, METHOD_SHORT, OUTCOME_LABEL, prepareImage,
 } from "../components/shared.jsx";
 import { useForecast, Likely, TurnoutPanel, TurnoutModelPanel } from "../components/forecast.jsx";
-import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox, SUFFIXES } from "./public.jsx";
+import { TopBar, Discover, EventsHome, EventPage, TicketPage, CreateEvent, EventForm, Lightbox, SUFFIXES, ProfilePage } from "./public.jsx";
+import { AdminPage } from "./admin.jsx";
 import { extractFaceDescriptor, euclideanDistance } from "../lib/face.js";
 
 /* SELAE — Smart Event Logistics and Analytics Engine */
@@ -41,6 +42,8 @@ export default function App() {
       parts[0] === "e" && parts[1] ? <EventPage id={parts[1]} /> :
       parts[0] === "t" && parts[1] ? <TicketPage code={parts[1]} /> :
       parts[0] === "create" ? <CreateEvent /> :
+      parts[0] === "profile" ? <ProfilePage /> :
+      parts[0] === "admin" ? <AdminPage /> :
       parts[0] === "discover" ? <Discover drawerId={parts[1] || null} /> :
       <EventsHome drawerId={parts[0] === "events" ? parts[1] || null : null} />;
     page = <><TopBar route={at} />{inner}</>;

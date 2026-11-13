@@ -4,6 +4,7 @@ import path from "node:path";
 import { newCode, newId, hashKey } from "./seed/seed.js";
 import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./intelligence/matcher.js";
 import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./intelligence/forecast.js";
+import { createAuth, supabaseVerifier, emailList } from "./auth.js";
 
 /* Logical layer */
 
@@ -50,16 +51,39 @@ function counts(data, eventId) {
 }
 function canManage(req, event) {
   if (isLocal(req)) return true;
+  if (event.orgId && req.orgIds && req.orgIds.has(event.orgId)) return true;
   const key = req.headers["x-selae-host-key"];
   if (!key) return false;
   const keys = String(key).split(",").map((k) => k.trim());
   return keys.some((k) => hashKey(k) === event.hostKeyHash);
 }
+// The active orgs this person hosts events for: their org account's org, or where they're an officer
+function hostOrgs(data, user, superadmins) {
+  if (!user) return [];
+  const active = (data.orgs || []).filter((o) => !o.disabled);
+  const { role, org } = roleOf(data, user, superadmins);
+  if (role === "org") return active.filter((o) => o.id === org.id);
+  if (role !== "student") return [];
+  const mine = new Set((data.orgMembers || []).filter((m) => m.email === user.email && m.status === "active").map((m) => m.orgId));
+  return active.filter((o) => mine.has(o.id));
+}
+
+// superadmin (from .env), org (signed in with the org's official Gmail), or student
+// Password sign-ups don't prove the email is theirs yet, so those roles need a Google sign-in
+function roleOf(data, user, superadmins) {
+  if (!user.viaGoogle) return { role: "student", org: null };
+  if (superadmins.includes(user.email)) return { role: "superadmin", org: null };
+  const org = (data.orgs || []).find((o) => o.email === user.email && !o.disabled);
+  if (org) return { role: "org", org: { id: org.id, name: org.name } };
+  return { role: "student", org: null };
+}
 function publicEvent(data, req, e) {
   const c = counts(data, e.id);
   const { hostKeyHash, ...rest } = e;
   const isPast = Date.now() > new Date(e.endsAt).getTime();
+  const org = e.orgId ? (data.orgs || []).find((o) => o.id === e.orgId) : null;
   return { ...rest, category: e.category || "General", coverImage: e.coverImage || null, photos: e.photos || [],
+    hostName: org ? org.name : e.hostName || "", org: org ? { id: org.id, name: org.name } : null,
     counts: c, spotsLeft: Math.max(0, e.capacity - c.going), isPast,
     registrationOpen: e.registrationOpen && !isPast, canManage: canManage(req, e) };
 }
@@ -129,6 +153,19 @@ function studentFields(b) {
   return { id: `${m[1]}-${m[2]}`, last, first, middle, suffix, section };
 }
 
+// A 128-number face signature, or null when none was sent
+function faceFrom(v) {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) || v.length !== 128 || !v.every((x) => typeof x === "number" && Number.isFinite(x))) fail(400, "Invalid facial scan data.");
+  return v;
+}
+
+function profileView(p) {
+  if (!p) return null;
+  const { faceDescriptor, ...rest } = p;
+  return { ...rest, hasFace: Array.isArray(faceDescriptor) };
+}
+
 function addRegistration(d, event, student, extra = {}) {
   // The first entry stays; the name typed here only goes on this ticket
   if (!d.directory[student.id]) d.directory[student.id] = student;
@@ -181,8 +218,6 @@ function checkIn(data, event, body, canLearn) {
 
 /* ---------- OCR matching (see matcher.js) ---------- */
 const MAX_SCANS = 3000;
-const REGISTER_LIMIT = 20;
-const REGISTER_WINDOW = 60000;
 
 function peopleFor(data, event) {
   const regs = new Map();
@@ -427,7 +462,9 @@ function historyKey(data, now) {
   return `${[...past].sort().join(",")}|${regs}|${came}`;
 }
 
-export function createApi(store) {
+export function createApi(store, { verify = supabaseVerifier(), superadmins = process.env.SELAE_SUPERADMINS } = {}) {
+  const userFor = createAuth(verify);
+  const admins = emailList(superadmins);
   let turnout = null, turnoutKey = "";
   const turnoutModel = () => {
     const now = new Date();
@@ -461,20 +498,161 @@ export function createApi(store) {
     const name = String(url || "").split("/").pop();
     if (UPLOAD_NAME.test(name)) store.removeUpload(name);
   };
-  const registerHits = new Map();
-  const limitRegistrations = (req) => {
-    const now = Date.now();
-    if (registerHits.size > 5000) registerHits.clear();
-    const ip = req.socket.remoteAddress;
-    const hits = (registerHits.get(ip) || []).filter((t) => now - t < REGISTER_WINDOW);
-    if (hits.length >= REGISTER_LIMIT) fail(429, "Too many registrations from this device. Wait a minute and try again.");
-    hits.push(now);
-    registerHits.set(ip, hits);
+  const requireUser = (req) => req.user || fail(401, "Sign in first.");
+  const requireSuperadmin = (req) => {
+    const user = requireUser(req);
+    if (roleOf(store.data, user, admins).role !== "superadmin") fail(403, "Only the superadmin can do that.");
+    return user;
+  };
+  const requireOrg = (req) => {
+    const user = requireUser(req);
+    const { role, org } = roleOf(store.data, user, admins);
+    if (role !== "org") fail(403, "Only organization accounts can do that.");
+    return store.data.orgs.find((o) => o.id === org.id);
+  };
+  // Who the officer is, from their student profile when they have one
+  const memberView = (m) => {
+    const p = Object.values(store.data.profiles || {}).find((x) => x.email === m.email);
+    return { id: m.id, email: m.email, status: m.status, invitedAt: m.invitedAt, acceptedAt: m.acceptedAt || null,
+      name: p ? `${p.last}, ${p.first}${p.middle ? ` ${p.middle}.` : ""}` : null, section: p ? p.section : null };
+  };
+  const membersOf = (orgId) => (store.data.orgMembers || []).filter((m) => m.orgId === orgId).map(memberView)
+    .sort((a, b) => (a.status === b.status ? a.email.localeCompare(b.email) : a.status === "active" ? -1 : 1));
+  const orgFields = (b) => {
+    const name = str(b.name, "Organization name", { max: 80 }).replace(/\s+/g, " ");
+    const email = str(b.email, "Official email", { max: 120 }).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
+    if (admins.includes(email)) fail(400, "That email belongs to a superadmin. Use the organization's own Gmail.");
+    return { name, email };
+  };
+  const checkOrgUnique = ({ name, email }, exceptId = null) => {
+    for (const o of store.data.orgs || []) {
+      if (o.id === exceptId) continue;
+      if (o.email === email) fail(409, `${o.name} already uses that email.`);
+      if (o.name.toLowerCase() === name.toLowerCase()) fail(409, "An organization with that name already exists.");
+    }
   };
   const requireManage = (req, event) => { if (!canManage(req, event)) fail(403, "Only this event's hosts can do that."); };
 
   const routes = [
     ["GET", /^\/api\/info$/, (req) => ({ isLocal: isLocal(req), lanUrls: lanUrls(req) })],
+
+    ["GET", /^\/api\/me$/, (req) => {
+      if (!req.user) return { user: null };
+      const profile = (store.data.profiles || {})[req.user.id];
+      const role = roleOf(store.data, req.user, admins);
+      // Officer roles and open invitations, from organizations that are still active
+      const orgById = new Map((store.data.orgs || []).filter((o) => !o.disabled).map((o) => [o.id, o]));
+      const mine = role.role === "student"
+        ? (store.data.orgMembers || []).filter((m) => m.email === req.user.email && orgById.has(m.orgId)) : [];
+      const brief = (m) => ({ id: orgById.get(m.orgId).id, name: orgById.get(m.orgId).name });
+      return { user: { ...req.user, ...role, profile: profileView(profile),
+        hostsFor: hostOrgs(store.data, req.user, admins).map((o) => ({ id: o.id, name: o.name })),
+        officerOf: mine.filter((m) => m.status === "active").map(brief),
+        invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m) })) } };
+    }],
+
+    // The signed-in student's own details, filled in once and reused for every event
+    ["PUT", /^\/api\/me\/profile$/, async (req) => {
+      const user = requireUser(req);
+      // Only students have one; the school admin and org accounts are staff
+      if (roleOf(store.data, user, admins).role !== "student") fail(403, "Only student accounts have a student profile.");
+      const b = await readBody(req);
+      const student = studentFields(b);
+      const face = faceFrom(b.faceDescriptor);
+      const taken = Object.values(store.data.profiles || {}).find((p) => p.studentId === student.id && p.userId !== user.id);
+      if (taken) fail(409, "Another account already uses this student number. If it's yours, ask an organizer for help.");
+      return store.mutate((d) => {
+        d.profiles = d.profiles || {};
+        const before = d.profiles[user.id];
+        const { id: studentId, ...name } = student;
+        d.profiles[user.id] = { id: user.id, userId: user.id, email: user.email, studentId, ...name,
+          faceDescriptor: face || (before && before.faceDescriptor) || null, updatedAt: new Date().toISOString() };
+        if (face) {
+          const ended = new Set(d.events.filter((e) => Date.now() > new Date(e.endsAt).getTime()).map((e) => e.id));
+          for (const r of d.registrations) if (r.userId === user.id && !ended.has(r.eventId)) r.faceDescriptor = face;
+        }
+        return { profile: profileView(d.profiles[user.id]) };
+      });
+    }],
+
+    /* ---------- org account: officers ---------- */
+    ["GET", /^\/api\/org\/members$/, (req) => {
+      const org = requireOrg(req);
+      return { org: { id: org.id, name: org.name }, members: membersOf(org.id) };
+    }],
+
+    ["POST", /^\/api\/org\/members$/, async (req) => {
+      const org = requireOrg(req);
+      const b = await readBody(req);
+      const email = str(b.email, "Email", { max: 120 }).toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
+      if (email === org.email) fail(400, "That's this organization's own account.");
+      if (admins.includes(email) || (store.data.orgs || []).some((o) => o.email === email)) fail(400, "That email is an admin or organization account, not a student.");
+      const existing = (store.data.orgMembers || []).find((m) => m.orgId === org.id && m.email === email);
+      if (existing) fail(409, existing.status === "active" ? "That student is already an officer." : "That student already has an invitation.");
+      return store.mutate((d) => {
+        d.orgMembers = d.orgMembers || [];
+        const member = { id: newId(), orgId: org.id, email, status: "invited", invitedAt: new Date().toISOString() };
+        d.orgMembers.push(member);
+        return { member: memberView(member) };
+      });
+    }],
+
+    // Removes an officer, or takes back an invitation
+    ["DELETE", /^\/api\/org\/members\/([\w-]+)$/, (req, [id]) => {
+      const org = requireOrg(req);
+      const member = (store.data.orgMembers || []).find((m) => m.id === id && m.orgId === org.id) || fail(404, "Officer not found.");
+      return store.mutate((d) => {
+        d.orgMembers = d.orgMembers.filter((m) => m !== member);
+        return { removed: true };
+      });
+    }],
+
+    // The invited student answers
+    ["POST", /^\/api\/me\/invites\/([\w-]+)\/(accept|decline)$/, (req, [id, answer]) => {
+      const user = requireUser(req);
+      const member = (store.data.orgMembers || []).find((m) => m.id === id && m.email === user.email && m.status === "invited")
+        || fail(404, "That invitation is no longer open.");
+      if (roleOf(store.data, user, admins).role !== "student") fail(403, "Only student accounts can be officers.");
+      return store.mutate((d) => {
+        if (answer === "accept") Object.assign(member, { status: "active", userId: user.id, acceptedAt: new Date().toISOString() });
+        else d.orgMembers = d.orgMembers.filter((m) => m !== member);
+        return { ok: true };
+      });
+    }],
+
+    /* ---------- superadmin: organizations ---------- */
+    ["GET", /^\/api\/admin\/orgs$/, (req) => {
+      requireSuperadmin(req);
+      return { orgs: [...(store.data.orgs || [])].sort((a, b) => a.name.localeCompare(b.name)) };
+    }],
+
+    ["POST", /^\/api\/admin\/orgs$/, async (req) => {
+      const user = requireSuperadmin(req);
+      const fields = orgFields(await readBody(req));
+      checkOrgUnique(fields);
+      return store.mutate((d) => {
+        d.orgs = d.orgs || [];
+        const org = { id: newId(), ...fields, disabled: false, createdAt: new Date().toISOString(), createdBy: user.email };
+        d.orgs.push(org);
+        return { org };
+      });
+    }],
+
+    // Rename, change the official Gmail (new officers), or disable and enable
+    ["PATCH", /^\/api\/admin\/orgs\/([\w-]+)$/, async (req, [id]) => {
+      requireSuperadmin(req);
+      const org = (store.data.orgs || []).find((o) => o.id === id) || fail(404, "Organization not found.");
+      const b = await readBody(req);
+      const fields = orgFields({ name: org.name, email: org.email, ...b });
+      checkOrgUnique(fields, id);
+      return store.mutate(() => {
+        Object.assign(org, fields, { updatedAt: new Date().toISOString() });
+        if (typeof b.disabled === "boolean") org.disabled = b.disabled;
+        return { org };
+      });
+    }],
 
     ["GET", /^\/api\/events$/, (req) => {
       const d = store.data;
@@ -485,12 +663,18 @@ export function createApi(store) {
     }],
 
     ["POST", /^\/api\/events$/, async (req) => {
+      const user = requireUser(req);
+      const orgs = hostOrgs(store.data, user, admins);
+      if (!orgs.length) fail(403, "Only organizations and their officers can create events.");
       const body = await readBody(req);
-      const fields = eventFields(body);
+      const org = body.orgId ? orgs.find((o) => o.id === body.orgId) || fail(403, "You can't host events for that organization.")
+        : orgs.length === 1 ? orgs[0] : fail(400, "Choose which organization hosts this event.");
+      const { hostName, ...fields } = eventFields(body);
       const hostKey = newCode(16);
       const event = store.mutate((d) => {
-        const e = { id: newId(), description: "", hostName: "", color: "gold", visibility: "public", registrationOpen: true,
-          ...fields, hostKeyHash: hashKey(hostKey), createdAt: new Date().toISOString() };
+        const e = { id: newId(), description: "", color: "gold", visibility: "public", registrationOpen: true,
+          ...fields, orgId: org.id, hostName: org.name, createdBy: user.email,
+          hostKeyHash: hashKey(hostKey), createdAt: new Date().toISOString() };
         d.events.push(e);
         return e;
       });
@@ -503,6 +687,7 @@ export function createApi(store) {
       const event = findEvent(id);
       requireManage(req, event);
       const fields = eventFields(await readBody(req), event);
+      if (event.orgId) delete fields.hostName;
       const going = counts(store.data, id).going;
       if (fields.capacity !== undefined && fields.capacity < going) fail(409, `${going} people are already going, so capacity can't be lower than that.`);
       store.mutate(() => Object.assign(event, fields));
@@ -558,30 +743,22 @@ export function createApi(store) {
       const event = findEvent(id);
       const pub = publicEvent(store.data, req, event);
       if (!pub.registrationOpen) fail(409, pub.isPast ? "This event has already ended." : "Registration is closed for this event.");
-      if (!pub.canManage) limitRegistrations(req);
-      const b = await readBody(req);
-      const student = studentFields(b);
-      const studentId = student.id;
-      const email = str(b.email, "Email", { max: 120, required: false });
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
-      // Validates faceDescriptor if provided, but allows null for OCR-only use.
-      let faceDescriptor = null;
-      if (b.faceDescriptor !== undefined && b.faceDescriptor !== null) {
-        if (!Array.isArray(b.faceDescriptor) || b.faceDescriptor.length !== 128 || !b.faceDescriptor.every((x) => typeof x === "number" && Number.isFinite(x))) {
-          fail(400, "Invalid facial scan data.");
-        }
-        faceDescriptor = b.faceDescriptor;
-      }
-      
+      // A signed-in student, with the details and face from their profile
+      const user = requireUser(req);
+      if (roleOf(store.data, user, admins).role !== "student") fail(403, "Sign in with a student account to register.");
+      const profile = (store.data.profiles || {})[user.id] || fail(409, "Set up your student profile first.");
+      const { id: _pid, userId: _uid, email: _email, studentId, faceDescriptor, updatedAt: _at, ...name } = profile;
+      const student = { id: studentId, ...name };
+
       const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
       if (existing) {
-        // Only hosts, who can already see this ticket, get it back
-        if (!pub.canManage) fail(409, "This student number is already registered for this event. Open the ticket on the device you registered with, or ask the organizer at the gate.");
+        // Their own ticket comes back on any device; nobody else's does
+        if (existing.userId !== user.id) fail(409, "This student number is already registered for this event. Ask the organizer at the gate.");
         return { existing: true, ticket: ticketView(store.data, req, existing) };
       }
 
       return store.mutate((d) => {
-        const reg = addRegistration(d, event, student, { email, faceDescriptor });
+        const reg = addRegistration(d, event, student, { email: user.email, userId: user.id, faceDescriptor: faceDescriptor || null });
         return { existing: false, ticket: ticketView(d, req, reg) };
       });
     }],
@@ -739,6 +916,8 @@ export function createApi(store) {
       res.end(JSON.stringify(payload));
     };
     try {
+      req.user = await userFor(req);
+      req.orgIds = new Set(hostOrgs(store.data, req.user, admins).map((o) => o.id));
       for (const [method, re, fn] of routes) {
         const m = url.pathname.match(re);
         if (!m) continue;
