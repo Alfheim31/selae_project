@@ -9,11 +9,12 @@ import {
   Cover, Mark, QrCode, Barcode, Trails, go, fmtTime, fmtDate, fmtRange, formatName, tidyName, tidyInitial, COLORS, COLOR_NAMES,
   skyOf, flightNo, prepareImage,
 } from "../components/shared.jsx";
-import { Camera, LogIn, Mail, Eye, EyeOff } from "lucide-react";
+import { Camera, LogIn, Mail, Eye, EyeOff, ChevronDown, UserRound, LogOut } from "lucide-react";
 import { signIn, signOut, useSession, passwordSignIn, passwordSignUp, verifyEmailCode, resendEmailCode } from "../lib/auth.js";
 import { useCamera } from "../components/camera.jsx";
 import { extractFaceDescriptor } from "../lib/face.js";
 import { OfficersPanel, InvitesPanel } from "./org.jsx";
+import { OrgsPanel } from "./admin.jsx";
 
 /* Public pages */
 
@@ -26,6 +27,9 @@ const categoryIcon = (c) => (CATEGORIES.find(([k]) => k === c) || CATEGORIES[CAT
 /* ---------------- top bar ---------------- */
 export function TopBar({ route }) {
   const at = (p) => (route === p ? "page" : undefined);
+  const account = useMe();
+  const { me } = account;
+  const canHost = Boolean(me && me.hostsFor && me.hostsFor.length);
   return (
     <header className="topbar">
       <div className="wrap flex items-center justify-between gap-2" style={{ height: 64, maxWidth: 1240 }}>
@@ -34,17 +38,19 @@ export function TopBar({ route }) {
             <Mark /><span className="word hidden sm:inline">SELAE</span>
           </button>
           <nav className="flex items-center gap-1" aria-label="Main">
-            <button className="toplink" aria-current={at("events")} onClick={() => go("")}><Ticket size={17} className="hidden sm:block" /> <span>Events</span></button>
-            <button className="toplink" aria-current={at("discover")} onClick={() => go("discover")}><Compass size={17} className="hidden sm:block" /> <span>Discover</span></button>
+            <button className="toplink" aria-current={at("discover")} onClick={() => go("")}><Compass size={17} className="hidden sm:block" /> <span>Discover</span></button>
+            <button className="toplink" aria-current={at("events")} onClick={() => go("events")}><Ticket size={17} className="hidden sm:block" /> <span>Events</span></button>
           </nav>
         </div>
         <div className="flex items-center gap-2">
           <LiveClock />
-          <NotificationBell />
-          <AccountButton />
-          <button className="btn btn-primary btn-sm" onClick={() => go("create")} style={{ height: 40 }}>
-            <Plus size={17} /><span className="hidden sm:inline">Create event</span>
-          </button>
+          {account.session && <NotificationBell uid={account.session.user.id} />}
+          <AccountMenu account={account} />
+          {canHost && (
+            <button className="btn btn-primary btn-sm" onClick={() => go("create")} style={{ height: 40 }}>
+              <Plus size={17} /><span className="hidden sm:inline">Create event</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
@@ -68,8 +74,30 @@ export function useMe() {
   return { me, reload, session };
 }
 
-function AccountButton() {
-  const session = useSession();
+// The name to show: the student's given name, the org's name, the Google name, or the start of the email
+export function displayName(me, session) {
+  if (me && me.role === "org" && me.org) return { first: me.org.name, full: me.org.name };
+  if (me && me.profile) return { first: me.profile.first, full: `${me.profile.first} ${me.profile.last}` };
+  const meta = (session && session.user.user_metadata) || {};
+  const google = meta.full_name || meta.name || "";
+  if (google) return { first: google.split(" ")[0], full: google };
+  const email = (me && me.email) || (session && session.user.email) || "";
+  return { first: email.split("@")[0], full: email.split("@")[0] };
+}
+
+function AccountMenu({ account }) {
+  const { me, session } = account;
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+
   if (session === undefined) return null;
   if (!session) {
     return (
@@ -78,19 +106,50 @@ function AccountButton() {
       </button>
     );
   }
+
   const meta = session.user.user_metadata || {};
-  const first = String(meta.full_name || meta.name || session.user.email).split(" ")[0];
+  const name = displayName(me, session);
+  const pick = (to) => { setOpen(false); go(to); };
+  const out = async () => { setOpen(false); await signOut(); go(""); };
+
   return (
-    <button className="btn btn-sm" onClick={() => go("profile")} title={`Signed in as ${session.user.email}`} style={{ height: 40, gap: 8 }}>
-      <Avatar meta={meta} name={first} size={26} />
-      <span className="hidden sm:inline">{first}</span>
-    </button>
+    <div className="relative" ref={box}>
+      <button className="btn btn-sm" onClick={() => setOpen((x) => !x)} aria-expanded={open} aria-haspopup="menu"
+        title={`Signed in as ${session.user.email}`} style={{ height: 40, gap: 8, paddingLeft: 6 }}>
+        <Avatar meta={meta} name={name.first} size={28} />
+        <span className="hidden sm:inline truncate" style={{ maxWidth: 140 }}>{name.first}</span>
+        <ChevronDown size={15} className="faint" />
+      </button>
+      {open && (
+        <div className="popover" role="menu" aria-label="Account" style={{ width: "min(280px, calc(100vw - 24px))" }}>
+          <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid var(--line)" }}>
+            <Avatar meta={meta} name={name.first} size={40} />
+            <div className="min-w-0">
+              <div className="truncate" style={{ fontWeight: 700 }}>{name.full}</div>
+              <div className="muted text-xs truncate">{session.user.email}</div>
+              {me && <div className="tag" style={{ marginTop: 2 }}>{ROLE_LABEL[me.role]}</div>}
+            </div>
+          </div>
+          <button className="notif" role="menuitem" onClick={() => pick("profile")} style={{ alignItems: "center" }}>
+            <span className="ic"><UserRound size={17} /></span><span>Profile</span>
+          </button>
+          <button className="notif" role="menuitem" onClick={out} style={{ alignItems: "center" }}>
+            <span className="ic" style={{ background: "var(--raised)", color: "var(--muted)" }}><LogOut size={17} /></span><span>Sign out</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
 function Avatar({ meta, name, size }) {
-  if (meta.avatar_url) return <img src={meta.avatar_url} alt="" referrerPolicy="no-referrer" style={{ width: size, height: size, borderRadius: "50%" }} />;
-  return <span aria-hidden="true">{String(name || "?")[0]}</span>;
+  if (meta.avatar_url) return <img src={meta.avatar_url} alt="" referrerPolicy="no-referrer" style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0 }} />;
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0, display: "inline-flex", alignItems: "center",
+      justifyContent: "center", background: "var(--accent)", color: "var(--accent-ink)", fontWeight: 700, fontSize: size * 0.45 }}>
+      {String(name || "?")[0].toUpperCase()}
+    </span>
+  );
 }
 
 const ROLE_LABEL = { superadmin: "Superadmin", org: "Organization account", student: "Student" };
@@ -106,37 +165,58 @@ export function ProfilePage() {
   const meta = (session && session.user.user_metadata) || {};
   const back = returnTo.get();
   const ready = me.role !== "student" || (me.profile && me.profile.hasFace);
+  const name = displayName(me, session);
   return (
-    <div className="narrow py-10 flex flex-col gap-4">
+    <div className="wrap py-10 flex flex-col gap-4" style={{ maxWidth: 1180 }}>
       {back && ready && (
         <div className="panel p-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: "var(--accent)" }}>
           <span className="text-sm">{me.role === "student" ? "You're all set. Go back to the event to register." : "Go back to where you were."}</span>
           <button className="btn btn-primary btn-sm" onClick={() => { returnTo.clear(); go(back); }}>Back to the event</button>
         </div>
       )}
-      <div className="panel p-5 flex items-center gap-4">
-        <Avatar meta={meta} name={me.name || me.email} size={52} />
-        <div className="min-w-0 flex-1">
-          <div style={{ fontWeight: 700, fontSize: "1.15rem" }}>{me.name || me.email}</div>
-          <div className="muted text-sm" style={{ overflowWrap: "anywhere" }}>{me.email}</div>
-          <div className="text-sm" style={{ marginTop: 2 }}>
-            {ROLE_LABEL[me.role]}{me.org ? ` · ${me.org.name}` : ""}
-            {(me.officerOf || []).map((o) => <span key={o.id} className="pill host" style={{ marginLeft: 8 }}>Officer · {o.name}</span>)}
+      <div className="grid gap-5 items-start lg:grid-cols-[320px_1fr]">
+        <aside className="flex flex-col gap-4 lg:sticky" style={{ top: 84 }}>
+          <div className="panel" style={{ overflow: "hidden", padding: 0 }}>
+            <div className="sky" style={{ height: 104 }}>
+              <Trails seed={me.email} opacity={0.6} />
+              <div className="tag relative" style={{ color: "rgba(255,255,255,.85)", padding: "1rem 1.1rem" }}>{ROLE_LABEL[me.role]}</div>
+            </div>
+            <div className="flex flex-col items-center gap-3" style={{ textAlign: "center", padding: "0 1.4rem 1.4rem", marginTop: -46 }}>
+              <span style={{ borderRadius: "50%", border: "4px solid var(--surface)", boxShadow: "0 6px 18px -6px rgba(20,27,58,.35)", lineHeight: 0, position: "relative" }}>
+                <Avatar meta={meta} name={name.first} size={84} />
+              </span>
+              <div className="min-w-0" style={{ width: "100%" }}>
+                <div className="display" style={{ fontSize: "1.6rem" }}>{name.full}</div>
+                <div className="muted text-sm" style={{ overflowWrap: "anywhere", marginTop: 4 }}>{me.email}</div>
+              </div>
+              {(me.org || (me.officerOf || []).length > 0) && (
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {me.org && <span className="pill host">{me.org.name}</span>}
+                  {(me.officerOf || []).map((o) => <span key={o.id} className="pill host">Officer · {o.name}</span>)}
+                </div>
+              )}
+              <dl className="text-sm" style={{ width: "100%", borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid",
+                gridTemplateColumns: "auto 1fr", gap: ".45rem .8rem", textAlign: "left" }}>
+                {me.profile && <><dt className="tag" style={{ alignSelf: "center" }}>Student no.</dt><dd className="mono" style={{ textAlign: "right" }}>{me.profile.studentId}</dd></>}
+                {me.profile && <><dt className="tag" style={{ alignSelf: "center" }}>Section</dt><dd style={{ textAlign: "right" }}>{me.profile.section}</dd></>}
+                <dt className="tag" style={{ alignSelf: "center" }}>Sign-in</dt>
+                <dd style={{ textAlign: "right" }}>{me.viaGoogle ? "Google" : "Email and password"}</dd>
+                {session && session.user.created_at && <>
+                  <dt className="tag" style={{ alignSelf: "center" }}>Joined</dt>
+                  <dd style={{ textAlign: "right" }}>{fmtDate(session.user.created_at, { month: "short", day: "numeric", year: "numeric" })}</dd>
+                </>}
+              </dl>
+              <button className="btn btn-sm" onClick={signOutHere} style={{ width: "100%" }}><LogOut size={15} /> Sign out</button>
+            </div>
           </div>
+          {me.role === "student" && <InvitesPanel me={me} onChange={reload} />}
+        </aside>
+        <div className="min-w-0">
+          {me.role === "student" ? <ProfileForm me={me} onSaved={reload} />
+            : me.role === "org" ? <OfficersPanel />
+            : <OrgsPanel />}
         </div>
-        <button className="btn btn-sm" onClick={signOutHere}>Sign out</button>
       </div>
-      {me.role === "student" ? <><InvitesPanel me={me} onChange={reload} /><ProfileForm me={me} onSaved={reload} /></>
-        : me.role === "org" ? <OfficersPanel />
-        : (
-          <button className="panel p-5 flex items-center justify-between gap-3" onClick={() => go("admin")} style={{ textAlign: "left", cursor: "pointer" }}>
-            <span>
-              <span style={{ display: "block", fontWeight: 700 }}>Organizations</span>
-              <span className="muted text-sm">Add, edit, and disable the organizations that host events.</span>
-            </span>
-            <ChevronRight size={20} />
-          </button>
-        )}
     </div>
   );
 }
@@ -406,8 +486,12 @@ export function LiveClock() {
 const NOTIF_ICON = {
   promoted: CheckCircle2, registered: Ticket, waitlist: Clock, soon: PlaneTakeoff, checkin: CheckCircle2, photos: Images,
   registrations: Users, photosPrompt: ImagePlus, newEvent: Megaphone,
+  invite: UserPlus, officer: CheckCircle2, removed: X, accepted: UserPlus, declined: X, orgEvent: Megaphone,
 };
 const notifTarget = (n) => {
+  if (["invite", "accepted", "declined", "removed"].includes(n.kind)) return "profile";
+  if (n.kind === "officer") return "events";
+  if (n.kind === "orgEvent") return `events/${n.eventId}`;
   if (["promoted", "registered", "waitlist", "soon", "checkin"].includes(n.kind)) return `t/${n.code}`;
   if (n.kind === "photos") return `e/${n.eventId}`;
   if (n.kind === "registrations") return `m/${n.eventId}`;
@@ -423,13 +507,19 @@ const ago = (t) => {
   return d === 1 ? "yesterday" : `${d} days ago`;
 };
 
-export function NotificationBell() {
+export function NotificationBell({ uid }) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState(null);
-  const [lastSeen, setLastSeen] = useState(seen.get());
+  const [lastSeen, setLastSeen] = useState(seen.get(uid));
   const box = useRef(null);
   const load = useCallback(() => api.notifications().then(setData).catch(() => {}), []);
-  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    setData(null);
+    setLastSeen(seen.get(uid));
+    load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, [load, uid]);
   useEffect(() => {
     if (!open) return undefined;
     const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
@@ -443,7 +533,7 @@ export function NotificationBell() {
   const toggle = () => {
     const next = !open;
     setOpen(next);
-    if (next) { load(); if (data) { seen.mark(data.now); } }
+    if (next) { load(); if (data) { seen.mark(uid, data.now); } }
     else if (data) setLastSeen(data.now);
   };
   return (
@@ -516,7 +606,7 @@ function TicketPill({ ticket }) {
   return <span className="pill cancelled">Cancelled</span>;
 }
 
-export function EventPass({ e, ticket, onOpen, active }) {
+export function EventPass({ e, ticket, onOpen, active, hosting = false }) {
   const d = new Date(e.startsAt);
   const Icon = categoryIcon(e.category);
   return (
@@ -538,7 +628,7 @@ export function EventPass({ e, ticket, onOpen, active }) {
             </div>
             <div className="flex flex-wrap items-center gap-1.5 mt-1">
               {isLive(e) && !e.isPast && <span className="pill lime">Boarding now</span>}
-              {e.canManage && <span className="pill host">Hosting</span>}
+              {hosting && <span className="pill host">Hosting</span>}
               <TicketPill ticket={ticket} />
               {e.isPast && (e.photos || []).length > 0 && <span className="pill past"><Images size={12} /> {e.photos.length} photos</span>}
             </div>
@@ -568,34 +658,23 @@ function useTickets() {
   }, [tickets]);
 }
 
-export function EventsHome({ drawerId }) {
-  const [events, error] = usePolled(() => api.events(), [], 10000);
-  const tickets = useTickets();
-  const [tab, setTab] = useState("upcoming");
-  const mine = (events || []).filter((e) => e.canManage || tickets.has(e.id));
-  const list = mine.filter((e) => (tab === "upcoming" ? !e.isPast : e.isPast));
-  const going = list.filter((e) => tickets.has(e.id) && tickets.get(e.id).status !== "cancelled");
-  const hosting = list.filter((e) => e.canManage && !going.includes(e));
-  const open = (id) => go(`events/${id}`);
+// Events hosted by one of the orgs this account runs or is an officer of
+const hostsEvent = (me, e) => Boolean(me && e.org && (me.hostsFor || []).some((o) => o.id === e.org.id));
 
-  const Section = ({ title, note, items }) => items.length > 0 && (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="panel-title" style={{ fontSize: "1.6rem" }}>{title}</h2>
-        <span className="tag">{note}</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        {items.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
-      </div>
-    </section>
-  );
+export function EventsHome({ drawerId }) {
+  const { me } = useMe();
+  const [events, error] = usePolled(() => api.events(), [], 10000);
+  const [tab, setTab] = useState("upcoming");
+  const orgs = (me && me.hostsFor) || [];
+  const hosted = (events || []).filter((e) => hostsEvent(me, e) && (tab === "upcoming" ? !e.isPast : e.isPast));
+  const open = (id) => go(`events/${id}`);
 
   return (
     <>
       <div className="wrap py-8 flex flex-col gap-8" style={{ maxWidth: 880 }}>
         <div className="page-head">
           <div>
-            <div className="tag mb-2">Your itinerary</div>
+            <div className="tag mb-2">{orgs.length ? `Hosted by ${orgs.map((o) => o.name).join(", ")}` : "Your organizations"}</div>
             <h1 className="page-title">Events</h1>
           </div>
           <div className="seg" role="group" aria-label="Show">
@@ -605,42 +684,40 @@ export function EventsHome({ drawerId }) {
           </div>
         </div>
         {error && <ErrorBox message={error} />}
-        {!events && !error && <Loading />}
-        {events && (
-          <>
-            <Section title="Your tickets" note={`${going.length} ${tab === "upcoming" ? "upcoming" : "past"}`} items={going} />
-            <Section title="Hosting" note="Managed from this device" items={hosting} />
-            {!going.length && !hosting.length && <EmptyItinerary past={tab === "past"} />}
-          </>
-        )}
+        {(!events || me === undefined) && !error && <Loading />}
+        {events && me !== undefined && (hosted.length ? (
+          <div className="flex flex-col gap-3">
+            {hosted.map((e) => <EventPass key={e.id} e={e} hosting active={drawerId === e.id} onOpen={() => open(e.id)} />)}
+          </div>
+        ) : <EmptyItinerary past={tab === "past"} canHost={orgs.length > 0} />)}
       </div>
-      {drawerId && <EventDrawer id={drawerId} onClose={() => go("")} />}
+      {drawerId && <EventDrawer id={drawerId} onClose={() => go("events")} />}
     </>
   );
 }
 
-function EmptyItinerary({ past }) {
+function EmptyItinerary({ past, canHost }) {
   return (
     <div className="pass-wrap">
       <div className="pass" style={{ overflow: "hidden" }}>
         <div className="sky" style={{ padding: "2rem 1.5rem", minHeight: 170 }}>
           <Trails seed="empty" />
           <div className="relative">
-            <div className="tag" style={{ color: "rgba(255,255,255,.8)" }}>{past ? "No past trips" : "No boarding passes yet"}</div>
+            <div className="tag" style={{ color: "rgba(255,255,255,.8)" }}>{past ? "No past events" : "Your organization's events"}</div>
             <div className="display" style={{ fontSize: "2.4rem", marginTop: ".35rem", textTransform: "uppercase" }}>
-              {past ? "Nothing here yet" : "Where to next?"}
+              No events hosted yet
             </div>
           </div>
         </div>
         <div className="tear" />
         <div className="p-5 flex flex-wrap items-center justify-between gap-3">
           <p className="muted" style={{ maxWidth: "46ch" }}>
-            {past ? "Events you registered for or hosted on this device appear here once they end."
-              : "Events you register for on this device, and events you host, show up here."}
+            {canHost ? (past ? "Your organization's events show up here once they end." : "Events your organization hosts show up here.")
+              : "Events from the organizations you're an officer of show up here. To join an event, find one on Discover."}
           </p>
           <div className="flex gap-2">
-            <button className="btn btn-primary" onClick={() => go("discover")}><Compass size={17} /> Discover events</button>
-            <button className="btn" onClick={() => go("create")}><Plus size={17} /> Host one</button>
+            {canHost && !past && <button className="btn btn-primary" onClick={() => go("create")}><Plus size={17} /> Create event</button>}
+            <button className={`btn ${canHost && !past ? "" : "btn-primary"}`} onClick={() => go("")}><Compass size={17} /> Discover events</button>
           </div>
         </div>
       </div>
@@ -660,6 +737,7 @@ function boardStatus(e, now = Date.now()) {
 }
 
 export function Discover({ drawerId }) {
+  const { me } = useMe();
   const [events, error] = usePolled(() => api.events(), [], 10000);
   const tickets = useTickets();
   const [cat, setCat] = useState(null);
@@ -683,6 +761,7 @@ export function Discover({ drawerId }) {
   const recentPhotos = all.filter((e) => e.isPast && (e.photos || []).length).sort((a, b) => b.endsAt.localeCompare(a.endsAt)).slice(0, 4);
   const open = (id) => go(`discover/${id}`);
   const filtered = cat || cal || q.trim();
+  const mine = upcoming.filter((e) => tickets.has(e.id) && tickets.get(e.id).status !== "cancelled");
 
   return (
     <>
@@ -708,6 +787,18 @@ export function Discover({ drawerId }) {
       <div className="wrap py-8 flex flex-col gap-10" style={{ maxWidth: 1240 }}>
         {error && <ErrorBox message={error} />}
         {!events && !error && <Loading />}
+
+        {mine.length > 0 && (
+          <section className="flex flex-col gap-3" aria-labelledby="mine-h">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 id="mine-h" className="panel-title" style={{ fontSize: "1.6rem" }}>Your tickets</h2>
+              <span className="tag">{mine.length} upcoming</span>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {mine.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} hosting={hostsEvent(me, e)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
+            </div>
+          </section>
+        )}
 
         <section className="flex flex-col gap-3" aria-labelledby="cat-h">
           <div className="flex items-baseline justify-between gap-3">
@@ -774,11 +865,11 @@ export function Discover({ drawerId }) {
             <span className="tag">{results.length} event{results.length === 1 ? "" : "s"}</span>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
-            {results.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
+            {results.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} hosting={hostsEvent(me, e)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
           </div>
           {events && !results.length && (
             <div className="panel p-6 text-center flex flex-col items-center gap-3">
-              <p className="muted">No upcoming events match. Try another category, or host one yourself.</p>
+              <p className="muted">No upcoming events match. Try another category or search.</p>
               <button className="btn" onClick={() => { setCat(null); setCal(null); setQ(""); }}>Clear filters</button>
             </div>
           )}
@@ -801,7 +892,7 @@ export function Discover({ drawerId }) {
           </section>
         )}
       </div>
-      {drawerId && <EventDrawer id={drawerId} onClose={() => go("discover")} />}
+      {drawerId && <EventDrawer id={drawerId} onClose={() => go("")} />}
     </>
   );
 }

@@ -37,15 +37,15 @@ export default function App() {
     const scan = parts[2] === "scan" || parts[2] === "scanner";
     page = <Manage id={parts[1]} tab={scan ? "dashboard" : TABS.includes(parts[2]) ? parts[2] : "dashboard"} scan={scan} />;
   } else {
-    const at = parts[0] === "discover" ? "discover" : !parts[0] || parts[0] === "events" || parts[0] === "tickets" ? "events" : parts[0];
+    const at = !parts[0] || parts[0] === "discover" ? "discover" : parts[0] === "events" || parts[0] === "tickets" ? "events" : parts[0];
     const inner =
       parts[0] === "e" && parts[1] ? <EventPage id={parts[1]} /> :
       parts[0] === "t" && parts[1] ? <TicketPage code={parts[1]} /> :
       parts[0] === "create" ? <CreateEvent /> :
       parts[0] === "profile" ? <ProfilePage /> :
       parts[0] === "admin" ? <AdminPage /> :
-      parts[0] === "discover" ? <Discover drawerId={parts[1] || null} /> :
-      <EventsHome drawerId={parts[0] === "events" ? parts[1] || null : null} />;
+      parts[0] === "events" || parts[0] === "tickets" ? <EventsHome drawerId={parts[0] === "events" ? parts[1] || null : null} /> :
+      <Discover drawerId={parts[0] === "discover" ? parts[1] || null : null} />;
     page = <><TopBar route={at} />{inner}</>;
   }
 
@@ -166,7 +166,7 @@ function Manage({ id, tab, scan }) {
           <div className="mt-auto flex flex-col gap-2">
             <Barcode value={event.id} height={28} color="rgba(255,255,255,.85)" />
             <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => go(`e/${id}`)}><ExternalLink size={16} /> Event page</button>
-            <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => go("")}><ArrowLeft size={16} /> All events</button>
+            <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => go("events")}><ArrowLeft size={16} /> Your events</button>
           </div>
         </aside>
 
