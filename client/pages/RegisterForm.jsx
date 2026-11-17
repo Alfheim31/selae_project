@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, LogIn, UserPlus } from "lucide-react";
 import { formatName, go } from "../components/shared.jsx";
-import { ErrorBox } from "../components/ui.jsx";
+import { ErrorBox, Sk } from "../components/ui.jsx";
 import { returnTo, useMe } from "../lib/account.js";
 import { api } from "../lib/api.js";
 
@@ -22,7 +22,15 @@ export function RegisterForm({ event }) {
     </div>
   );
 
-  if (me === undefined) return <div className="flex flex-col gap-4">{heading}<p className="muted text-sm">Loading…</p></div>;
+  if (me === undefined) {
+    return (
+      <div className="flex flex-col gap-4" role="status" aria-busy="true" aria-label="Loading">
+        {heading}
+        <div className="flex flex-col gap-2 p-4" style={{ background: "var(--raised)", borderRadius: 14 }}><Sk w={90} h={10} /><Sk w="60%" h={20} /><Sk w="45%" h={12} /></div>
+        <Sk h={50} r={10} />
+      </div>
+    );
+  }
 
   let blocker = null;
   if (!me) {

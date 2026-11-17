@@ -8,13 +8,14 @@ import { InvitesPanel } from "./InvitesPanel.jsx";
 import { OfficersPanel } from "./OfficersPanel.jsx";
 import { OrgsPanel } from "./OrgsPanel.jsx";
 import { ProfileForm } from "./ProfileForm.jsx";
+import { ProfileSkeleton } from "../../components/ui.jsx";
 
 /* ---------------- profile: filled in once, used for every event ---------------- */
 export function ProfilePage() {
   const { me, reload, session } = useMe();
   const signOutHere = async () => { await signOut(); go(""); };
 
-  if (me === undefined) return <div className="narrow py-10 muted">Loading your account…</div>;
+  if (me === undefined) return <ProfileSkeleton />;
   if (!me) return <div className="narrow py-10"><AuthForm /></div>;
 
   const meta = (session && session.user.user_metadata) || {};

@@ -1,9 +1,10 @@
 import { useMe } from "../lib/account.js";
 import { OrgsPanel } from "./account/OrgsPanel.jsx";
+import { Loading } from "../components/ui.jsx";
 
 export function AdminPage() {
   const { me } = useMe();
-  if (me === undefined) return <div className="narrow py-10 muted">Loading…</div>;
+  if (me === undefined) return <Loading />;
   if (!me || me.role !== "superadmin") {
     return (
       <div className="narrow py-10">

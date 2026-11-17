@@ -4,7 +4,7 @@ import { api, myTickets } from "../lib/api.js";
 import { categoryIcon, isLive, TicketPill } from "./EventPass.jsx";
 import { Lightbox } from "./Lightbox.jsx";
 import { Barcode, Cover, flightNo, fmtDate, fmtTime, go } from "./shared.jsx";
-import { ErrorBox, Loading, usePolled } from "./ui.jsx";
+import { ErrorBox, Sk, usePolled } from "./ui.jsx";
 
 /* ---------------- slide-over: event details ---------------- */
 export function EventDrawer({ id, onClose }) {
@@ -36,7 +36,13 @@ export function EventDrawer({ id, onClose }) {
         </div>
         <div className="dbody">
           {error && !event && <ErrorBox message={error} />}
-          {!event && !error && <Loading />}
+          {!event && !error && (
+            <div className="flex flex-col gap-4" role="status" aria-busy="true" aria-label="Loading">
+              <Sk h={200} r={14} /><Sk w={90} h={20} r={999} /><Sk w="85%" h={34} /><Sk w="60%" />
+              <div className="grid grid-cols-2 gap-3">{[0, 1, 2, 3].map((i) => <div key={i} className="flex flex-col gap-1.5"><Sk w={50} h={10} /><Sk w="75%" h={16} /></div>)}</div>
+              <Sk h={46} r={10} />
+            </div>
+          )}
           {event && (
             <div className="flex flex-col gap-5">
               <Cover event={event} className="wide" showTitle={false} />

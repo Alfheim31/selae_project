@@ -248,6 +248,11 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .camselect{background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;color:var(--text);padding:.32rem .55rem;font:inherit;font-size:.88rem;max-width:220px}
 .spin{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.sk{display:block;border-radius:8px;background:linear-gradient(90deg,#E6EAF2 0%,#E6EAF2 35%,#F3F5FA 50%,#E6EAF2 65%,#E6EAF2 100%);
+  background-size:300% 100%;animation:sk 1.3s ease-in-out infinite}
+.sk-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+@keyframes sk{from{background-position:100% 0}to{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}}
 .ocr-tag{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);background:var(--lime);color:var(--lime-ink);
   font-weight:700;font-size:.85rem;padding:.3rem .7rem;border-radius:6px;white-space:nowrap}
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}

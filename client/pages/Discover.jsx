@@ -3,7 +3,7 @@ import { BellRing, Calendar, Search, UserPlus, X } from "lucide-react";
 import { EventDrawer } from "../components/EventDrawer.jsx";
 import { CATEGORIES, EventPass } from "../components/EventPass.jsx";
 import { fmtDate, fmtTime, go, skyOf, Trails } from "../components/shared.jsx";
-import { ErrorBox, Loading, usePolled } from "../components/ui.jsx";
+import { DiscoverSkeleton, ErrorBox, usePolled } from "../components/ui.jsx";
 import { useMe } from "../lib/account.js";
 import { api, follows } from "../lib/api.js";
 import { hostsEvent, useTickets } from "../lib/tickets.js";
@@ -69,7 +69,7 @@ export function Discover({ drawerId }) {
 
       <div className="wrap py-8 flex flex-col gap-10" style={{ maxWidth: 1240 }}>
         {error && <ErrorBox message={error} />}
-        {!events && !error && <Loading />}
+        {!events && !error && <DiscoverSkeleton />}
 
         {mine.length > 0 && (
           <section className="flex flex-col gap-3" aria-labelledby="mine-h">

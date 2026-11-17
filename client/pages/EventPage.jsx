@@ -3,7 +3,7 @@ import { ArrowLeft, CheckCircle2, Clock, ScanLine, Settings, Ticket } from "luci
 import { categoryIcon, isLive } from "../components/EventPass.jsx";
 import { Lightbox } from "../components/Lightbox.jsx";
 import { Cover, fmtDate, fmtTime, formatName, go, skyOf } from "../components/shared.jsx";
-import { ErrorBox, Loading, usePolled } from "../components/ui.jsx";
+import { ErrorBox, EventPageSkeleton, usePolled } from "../components/ui.jsx";
 import { api, myTickets } from "../lib/api.js";
 import { RegisterForm } from "./RegisterForm.jsx";
 
@@ -16,7 +16,7 @@ export function EventPage({ id }) {
   const active = ticket && ticket.status !== "cancelled";
 
   if (error && !event) return <div className="narrow py-8"><ErrorBox message={error} /></div>;
-  if (!event) return <Loading />;
+  if (!event) return <EventPageSkeleton />;
   const Icon = categoryIcon(event.category);
 
   return (

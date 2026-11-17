@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Ban, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Plus, Power, Search, Users } from "lucide-react";
 import { COLORS, skyOf } from "../../components/shared.jsx";
-import { ErrorBox } from "../../components/ui.jsx";
+import { ErrorBox, Sk } from "../../components/ui.jsx";
 import { api } from "../../lib/api.js";
 
 const PAGE_SIZE = 8;
@@ -81,7 +81,7 @@ export function OrgsPanel() {
           <div key={label} className="panel orgstat">
             <span className="ic" style={{ background: bg, color: fg }}><Icon size={20} /></span>
             <div>
-              <div className="n">{orgs ? n : "–"}</div>
+              <div className="n">{orgs ? n : <Sk w={36} h={28} />}</div>
               <div className="tag" style={{ marginTop: 3 }}>{label}</div>
             </div>
           </div>
@@ -96,7 +96,7 @@ export function OrgsPanel() {
         <div className="flex items-center justify-between gap-3 flex-wrap" style={{ padding: "1rem 1.1rem" }}>
           <div>
             <div className="panel-title">All organizations</div>
-            <div className="tag" style={{ marginTop: 2 }}>{orgs ? `${shown.length} ${term ? "found" : "total"}` : "Loading…"}</div>
+            <div className="tag" style={{ marginTop: 2 }}>{orgs ? `${shown.length} ${term ? "found" : "total"}` : <Sk w={60} h={10} />}</div>
           </div>
           {all.length > 0 && (
             <label className="field" style={{ flex: "0 1 280px" }}>
@@ -115,6 +115,17 @@ export function OrgsPanel() {
         )}
         {orgs && all.length > 0 && !shown.length && (
           <p className="muted text-sm" style={{ padding: "1.2rem 1.1rem", borderTop: "1px solid var(--line)" }}>No organization matches “{q.trim()}”.</p>
+        )}
+        {!orgs && !error && (
+          <div style={{ borderTop: "1px solid var(--line)" }}>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3" style={{ padding: ".95rem 1.1rem", borderTop: i ? "1px solid var(--line)" : 0 }}>
+                <Sk w={48} h={48} r={12} />
+                <div className="flex-1 flex flex-col gap-1.5"><Sk w="40%" h={15} /><Sk w="30%" h={11} /><Sk w="25%" h={9} /></div>
+                <Sk w={140} h={32} r={10} />
+              </div>
+            ))}
+          </div>
         )}
         {slice.map((o) => <OrgRow key={o.id} org={o} onChange={replace} />)}
 

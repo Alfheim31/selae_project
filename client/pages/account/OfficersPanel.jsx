@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Mail, UserPlus, X } from "lucide-react";
-import { ErrorBox } from "../../components/ui.jsx";
+import { ErrorBox, RowsSkeleton } from "../../components/ui.jsx";
 import { api } from "../../lib/api.js";
 
 export function OfficersPanel() {
@@ -44,7 +44,7 @@ export function OfficersPanel() {
       </form>
       {error && <ErrorBox message={error} />}
 
-      {members === null ? <p className="muted text-sm">Loading…</p> : (
+      {members === null ? <RowsSkeleton rows={3} /> : (
         <>
           <MemberList title={`Officers · ${active.length}`} empty="No officers yet." list={active} onRemove={remove} />
           {invited.length > 0 && <MemberList title={`Waiting for them to accept · ${invited.length}`} list={invited} onRemove={remove} pending />}

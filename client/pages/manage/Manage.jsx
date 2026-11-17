@@ -9,6 +9,7 @@ import { PhotosPage } from "./PhotosPage.jsx";
 import { Scanner } from "./Scanner.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { TestTickets } from "./TestTickets.jsx";
+import { ManageSkeleton } from "../../components/ui.jsx";
 
 /* ---------------- server state for one event ---------------- */
 function toData(s) {
@@ -67,8 +68,8 @@ export function Manage({ id, tab, scan }) {
     return (
       <>
         <TopBar route="" />
-        <div className="narrow py-10">
-          {error ? (
+        {error ? (
+          <div className="narrow py-10">
             <div className="panel p-6 flex flex-col gap-3">
               <h1 className="panel-title">{/hosts/.test(error) ? "You don't manage this event on this device" : "Couldn't load this event"}</h1>
               <p className="muted">{/hosts/.test(error)
@@ -76,8 +77,8 @@ export function Manage({ id, tab, scan }) {
                 : error}</p>
               <button className="btn self-start" onClick={() => go(`e/${id}`)}>View the event page</button>
             </div>
-          ) : <div className="flex justify-center py-16"><div className="spin" aria-label="Loading" /></div>}
-        </div>
+          </div>
+        ) : <ManageSkeleton />}
       </>
     );
   }

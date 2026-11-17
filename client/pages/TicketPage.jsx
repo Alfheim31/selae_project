@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { flightNo, fmtDate, fmtTime, go, skyOf, Trails } from "../components/shared.jsx";
-import { ErrorBox, Loading, usePolled } from "../components/ui.jsx";
+import { ErrorBox, TicketSkeleton, usePolled } from "../components/ui.jsx";
 import { api, myTickets } from "../lib/api.js";
 
 /* ---------------- ticket: a boarding pass ---------------- */
@@ -16,7 +16,7 @@ export function TicketPage({ code }) {
   useEffect(() => { if (ticket && ticket.event) myTickets.add(code, ticket.event.id); }, [ticket, code]);
 
   if (error && !ticket) return <div className="narrow py-8"><ErrorBox message={error} /></div>;
-  if (!ticket) return <Loading />;
+  if (!ticket) return <TicketSkeleton />;
   const { event, student } = ticket;
   const cancelled = ticket.status === "cancelled";
   const status = ticket.checkin ? "Checked in" : ticket.status === "going" ? "Confirmed" : ticket.status === "waitlist" ? "Waitlist" : "Cancelled";

@@ -3,10 +3,11 @@ import { EventForm } from "../components/EventForm.jsx";
 import { go } from "../components/shared.jsx";
 import { useMe } from "../lib/account.js";
 import { api } from "../lib/api.js";
+import { FormSkeleton } from "../components/ui.jsx";
 
 export function CreateEvent() {
   const { me } = useMe();
-  if (me === undefined) return <div className="narrow py-10 muted">Loading…</div>;
+  if (me === undefined) return <FormSkeleton />;
   const orgs = me ? me.hostsFor || [] : [];
   if (!orgs.length) {
     return (

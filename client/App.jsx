@@ -51,7 +51,7 @@ export default function App() {
   return (
     <div className="selae">
       <style>{CSS}</style>
-      <Suspense fallback={<div className="wrap py-10"><Loading /></div>}>{page}</Suspense>
+      <Suspense fallback={<Loading />}>{page}</Suspense>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { Compass, Plus } from "lucide-react";
 import { EventDrawer } from "../components/EventDrawer.jsx";
 import { EventPass } from "../components/EventPass.jsx";
 import { go, Trails } from "../components/shared.jsx";
-import { ErrorBox, Loading, usePolled } from "../components/ui.jsx";
+import { ErrorBox, PassListSkeleton, usePolled } from "../components/ui.jsx";
 import { useMe } from "../lib/account.js";
 import { api } from "../lib/api.js";
 import { hostsEvent } from "../lib/tickets.js";
@@ -31,7 +31,7 @@ export function EventsHome({ drawerId }) {
           </div>
         </div>
         {error && <ErrorBox message={error} />}
-        {(!events || me === undefined) && !error && <Loading />}
+        {(!events || me === undefined) && !error && <PassListSkeleton count={3} />}
         {events && me !== undefined && (hosted.length ? (
           <div className="flex flex-col gap-3">
             {hosted.map((e) => <EventPass key={e.id} e={e} hosting active={drawerId === e.id} onOpen={() => open(e.id)} />)}
