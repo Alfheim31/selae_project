@@ -1,28 +1,10 @@
 import { useEffect, useState } from "react";
-import { Building2, Plus, Pencil, Search, ChevronLeft, ChevronRight, CheckCircle2, Ban, Users, CalendarDays, Power } from "lucide-react";
-import { api } from "../lib/api.js";
-import { COLORS, skyOf } from "../components/shared.jsx";
-import { useMe, ErrorBox } from "./public.jsx";
-
-/* Superadmin: the organizations that host events */
+import { Ban, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Plus, Power, Search, Users } from "lucide-react";
+import { COLORS, skyOf } from "../../components/shared.jsx";
+import { ErrorBox } from "../../components/ui.jsx";
+import { api } from "../../lib/api.js";
 
 const PAGE_SIZE = 8;
-
-export function AdminPage() {
-  const { me } = useMe();
-  if (me === undefined) return <div className="narrow py-10 muted">Loading…</div>;
-  if (!me || me.role !== "superadmin") {
-    return (
-      <div className="narrow py-10">
-        <div className="panel p-6 flex flex-col gap-2">
-          <h1 className="panel-title">Superadmin only</h1>
-          <p className="muted">Sign in with Google using a superadmin account to manage organizations.</p>
-        </div>
-      </div>
-    );
-  }
-  return <div className="wrap py-10" style={{ maxWidth: 900 }}><OrgsPanel /></div>;
-}
 
 // Each org keeps one sky color, picked from its id
 const skyFor = (id) => {
@@ -31,12 +13,13 @@ const skyFor = (id) => {
   for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return skyOf(keys[h % keys.length]);
 };
+
 const initials = (name) => {
   const caps = name.split(/\s+/).filter((w) => /^[A-Z0-9]/.test(w)).map((w) => w[0]);
   return (caps.length >= 2 ? caps.slice(0, 2) : [name[0]]).join("").toUpperCase();
 };
 
-const CSS = `
+const ORGS_CSS = `
 .orgstat{display:flex;align-items:center;gap:.8rem;padding:1rem 1.1rem}
 .orgstat .ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .orgstat .n{font-family:var(--f-display);font-weight:700;font-size:1.9rem;line-height:1}
@@ -83,7 +66,7 @@ export function OrgsPanel() {
 
   return (
     <div className="flex flex-col gap-5">
-      <style>{CSS}</style>
+      <style>{ORGS_CSS}</style>
       <div>
         <div className="tag mb-2">Admin console</div>
         <h1 className="display" style={{ fontSize: "2.6rem", textTransform: "uppercase" }}>Organizations</h1>

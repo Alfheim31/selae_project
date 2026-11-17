@@ -348,17 +348,34 @@ server/
 client/
   index.html           the page shell
   main.jsx             entry point
+  App.jsx              routing; the organizer tools, profile, admin and event form load on first visit
   index.css            Tailwind
   pages/
-    SELAE_Frontend.jsx routing, the organizer console, scanner modal, photos
-    public.jsx         top bar, notifications, events, discover, slide-over, event page,
-                       registration, ticket, create event
+    Discover.jsx       home: upcoming events, your tickets, categories, calendars
+    EventsHome.jsx     events hosted by your organizations
+    EventPage.jsx      one event; RegisterForm.jsx registers from the student profile
+    TicketPage.jsx     the boarding pass
+    CreateEvent.jsx    new event for an organization
+    AdminPage.jsx      superadmin: organizations
+    account/           profile page, sign-in and sign-up, student profile form,
+                       organizations (superadmin), officers (org), invitations (student)
+    manage/            organizer console: Manage.jsx shell, dashboard, gate scanner and
+                       its result panel, analytics, matcher, photos, settings, test tickets
   components/
     shared.jsx         design system (styles), sky covers, barcodes, formatting, QR code, photo resizing
+    TopBar.jsx         top bar and clock; AccountMenu.jsx and NotificationBell.jsx sit in it
+    EventPass.jsx      the event card, categories; EventDrawer.jsx is the slide-over
+    EventForm.jsx      create and edit form with the cover picker
+    FaceCapture.jsx    face scan by webcam or selfie; StudentFields.jsx for name and number
+    ui.jsx             polling hook, loading and error boxes; Lightbox.jsx for photos
     camera.jsx         webcam access, beeps, hold-to-exit
     forecast.jsx       turnout forecast panel, waitlist release, turnout model panel
   lib/
     api.js             client for the server API; host keys and tickets per device
+    auth.js            Supabase sign-in (email code or Google) and the session
+    account.js         the signed-in account (one /api/me for the page), sign-up hand-off
+    tickets.js         your tickets, and which events your organizations host
+    face.js            face models and face signatures
     ocr.js             OCR of the printed student number (Tesseract), with glare correction
   public/tesseract/    OCR worker, engine and model, copied from node_modules (ignored by git)
 data/                  the local JSON data file and uploads, when Supabase isn't configured (ignored by git)
