@@ -99,14 +99,20 @@ event.
 
 ## Who can manage what
 
-- Anyone on the Wi-Fi can browse public events, register, and view or cancel their
-  own ticket.
-- An event can be managed from **the device that created it**, from **the laptop
-  running the server** (localhost manages every event), or by anyone who opens its
-  **co-host link** (Invite & settings).
+Sign-in uses Supabase Auth (email and password with an emailed code, or Google).
 
-This keeps a stranger on the same Wi-Fi from opening your gate scanner. It is not
-real authentication: there are no accounts or passwords.
+- **Superadmin** (the Gmail addresses in `SELAE_SUPERADMINS`, signed in with Google):
+  adds, edits, and disables organizations.
+- **Organization account** (the org's official Gmail, signed in with Google): invites
+  and removes officers, and creates and manages the org's events.
+- **Student**: fills in a profile once (student number, name, section, face) and
+  registers for events in one click. An officer is a student the org invited; they
+  create and manage the org's events too.
+- Anyone with an event's **co-host link** (Invite & settings) can manage that event,
+  for gate volunteers without an account.
+- **Venue mode** (`SELAE_VENUE_LAPTOP=1`, for an offline venue): the laptop running
+  the server manages every event from localhost. It's off by default, so localhost is
+  no one special.
 
 ## Data
 

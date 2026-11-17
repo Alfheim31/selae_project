@@ -119,7 +119,7 @@ function Manage({ id, tab, scan }) {
             <div className="panel p-6 flex flex-col gap-3">
               <h1 className="panel-title">{/hosts/.test(error) ? "You don't manage this event on this device" : "Couldn't load this event"}</h1>
               <p className="muted">{/hosts/.test(error)
-                ? "Events can be managed from the device that created them, from the laptop running SELAE, or by opening a co-host link."
+                ? "Events are managed by the organization's account and its officers, or by opening a co-host link. Sign in with one of those accounts."
                 : error}</p>
               <button className="btn self-start" onClick={() => go(`e/${id}`)}>View the event page</button>
             </div>

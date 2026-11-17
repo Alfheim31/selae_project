@@ -50,7 +50,8 @@ function counts(data, eventId) {
   return { going, waitlist, checkedIn };
 }
 function canManage(req, event) {
-  if (isLocal(req)) return true;
+  // Venue mode only: the laptop running SELAE manages every event
+  if (req.isLaptop) return true;
   if (event.orgId && req.orgIds && req.orgIds.has(event.orgId)) return true;
   const key = req.headers["x-selae-host-key"];
   if (!key) return false;
@@ -497,7 +498,9 @@ function historyKey(data, now) {
   return `${[...past].sort().join(",")}|${regs}|${came}`;
 }
 
-export function createApi(store, { verify = supabaseVerifier(), superadmins = process.env.SELAE_SUPERADMINS } = {}) {
+// venueLaptop: an offline venue laptop (SELAE_VENUE_LAPTOP=1) manages every event from localhost
+export function createApi(store, { verify = supabaseVerifier(), superadmins = process.env.SELAE_SUPERADMINS,
+  venueLaptop = process.env.SELAE_VENUE_LAPTOP === "1" } = {}) {
   const userFor = createAuth(verify);
   const admins = emailList(superadmins);
   let turnout = null, turnoutKey = "";
@@ -902,7 +905,8 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
 
     // Reset matcher
     ["POST", /^\/api\/matcher\/reset$/, (req) => {
-      if (!isLocal(req)) fail(403, "Only the laptop running SELAE can reset the matcher.");
+      const admin = req.user && roleOf(store.data, req.user, admins).role === "superadmin";
+      if (!req.isLaptop && !admin) fail(403, "Only the superadmin can reset the matcher.");
       store.mutate((d) => { const t = d.matcher ? d.matcher.thresholds : undefined; d.matcher = emptyModel(); if (t) d.matcher.thresholds = t; });
       return { ok: true };
     }],
@@ -961,6 +965,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       res.end(JSON.stringify(payload));
     };
     try {
+      req.isLaptop = venueLaptop && isLocal(req);
       req.user = await userFor(req);
       req.orgIds = new Set(hostOrgs(store.data, req.user, admins).map((o) => o.id));
       for (const [method, re, fn] of routes) {

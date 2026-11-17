@@ -23,11 +23,12 @@ const fakeVerify = async (token) => {
   return USERS.includes(email) ? { id: email, email, name: "", avatar: null, viaGoogle } : null;
 };
 
-function setup(t) {
+// The older tests run as the venue laptop; pass { venueLaptop: false } for the normal setup
+function setup(t, { venueLaptop = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "selae-api-"));
   const store = openStore(path.join(dir, "data.json"));
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  const handle = createApi(store, { verify: fakeVerify, superadmins: "Boss@gmail.com" });
+  const handle = createApi(store, { verify: fakeVerify, superadmins: "Boss@gmail.com", venueLaptop });
   // Events in the tests belong to this org, whose account is host@gmail.com
   store.mutate((d) => { d.orgs = [{ id: "test-org", name: "Test Org", email: "host@gmail.com" }]; });
   const call = async (method, url, body, { from = PHONE, headers = {} } = {}) => {
@@ -502,4 +503,21 @@ test("invitations, answers, removals, and new org events all reach the bell", as
   await call("DELETE", `/api/org/members/${officer.id}`, null, as("host@gmail.com"));
   const after = await kinds("ana@gmail.com");
   assert.ok(after.includes("removed") && !after.includes("officer"));
+});
+
+test("localhost is no one special unless venue mode is on", async (t) => {
+  const { call, event } = setup(t, { venueLaptop: false });
+  const as = (token) => ({ from: LAPTOP, headers: { authorization: `Bearer ${token}` } });
+  const { id, hostKey } = await event();
+
+  // Signed out or a student on the laptop: no access
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP })).status, 403);
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, as("ana@gmail.com"))).status, 403);
+  assert.equal((await call("GET", `/api/events/${id}`, null, as("ana@gmail.com"))).json.canManage, false);
+  assert.equal((await call("POST", "/api/matcher/reset", null, { from: LAPTOP })).status, 403);
+
+  // The org, a co-host link, and the superadmin's matcher reset still work
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, as("host@gmail.com"))).status, 200);
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP, headers: { "x-selae-host-key": hostKey } })).status, 200);
+  assert.equal((await call("POST", "/api/matcher/reset", null, as("boss@gmail.com"))).status, 200);
 });
