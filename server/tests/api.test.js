@@ -449,3 +449,57 @@ test("only an org and its officers create and manage the org's events", async (t
   assert.equal((await edit("ana@gmail.com")).status, 403);
   assert.equal((await edit("host@gmail.com")).status, 403);
 });
+
+test("notifications belong to the signed-in account", async (t) => {
+  const { call, event, register } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const notes = async (token, body = {}) => (await call("POST", "/api/notifications", body, token ? as(token) : {})).json.items;
+  const { id } = await event();
+  const mine = await register(id, "2099-00001");
+  await register(id, "2099-00002");
+
+  // Signed out: nothing, even with a ticket code from this device
+  assert.deepEqual(await notes(null, { tickets: [mine.json.ticket.code] }), []);
+
+  // Each student only hears about their own tickets
+  const ana = await notes("s:2099-00001");
+  assert.ok(ana.some((n) => n.kind === "registered" && n.code === mine.json.ticket.code));
+  assert.ok(!ana.some((n) => n.code && n.code !== mine.json.ticket.code));
+  assert.ok(!ana.some((n) => n.host));
+
+  // The org hears about its event; a student who isn't an officer doesn't
+  assert.ok((await notes("host@gmail.com")).some((n) => n.kind === "registrations" && n.eventId === id));
+  assert.ok(!(await notes("ana@gmail.com")).some((n) => n.host));
+});
+
+test("invitations, answers, removals, and new org events all reach the bell", async (t) => {
+  const { call } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const kinds = async (token) => (await call("POST", "/api/notifications", {}, as(token))).json.items.map((n) => n.kind);
+  const fields = { title: "Jam", venue: "Lab", capacity: 30, startsAt: future(24), endsAt: future(26) };
+
+  // The student sees the invitation
+  const inv = await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("host@gmail.com"));
+  assert.ok((await kinds("ana@gmail.com")).includes("invite"));
+  assert.ok(!(await kinds("ben@gmail.com")).includes("invite"));
+
+  // Accepting: the student is told they're an officer, and the org is told who accepted
+  await call("POST", `/api/me/invites/${inv.json.member.id}/accept`, null, as("ana@gmail.com"));
+  const ana = await kinds("ana@gmail.com");
+  assert.ok(ana.includes("officer") && !ana.includes("invite"));
+  assert.ok((await kinds("host@gmail.com")).includes("accepted"));
+
+  // An event the officer creates reaches the org account, not the officer who made it
+  await call("POST", "/api/events", fields, as("ana@gmail.com"));
+  assert.ok((await kinds("host@gmail.com")).includes("orgEvent"));
+  assert.ok(!(await kinds("ana@gmail.com")).includes("orgEvent"));
+
+  // Declining reaches the org; removing reaches the student
+  const inv2 = await call("POST", "/api/org/members", { email: "ben@gmail.com" }, as("host@gmail.com"));
+  await call("POST", `/api/me/invites/${inv2.json.member.id}/decline`, null, as("ben@gmail.com"));
+  assert.ok((await kinds("host@gmail.com")).includes("declined"));
+  const officer = (await call("GET", "/api/org/members", null, as("host@gmail.com"))).json.members.find((m) => m.email === "ana@gmail.com");
+  await call("DELETE", `/api/org/members/${officer.id}`, null, as("host@gmail.com"));
+  const after = await kinds("ana@gmail.com");
+  assert.ok(after.includes("removed") && !after.includes("officer"));
+});

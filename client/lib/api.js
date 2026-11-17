@@ -38,9 +38,10 @@ export const follows = {
   },
 };
 
+// Last time each account opened its notifications
 export const seen = {
-  get: () => load(SEEN, null),
-  mark(time) { save(SEEN, time); },
+  get: (uid) => (load(SEEN, {}) || {})[uid] || null,
+  mark(uid, time) { const all = load(SEEN, {}); save(SEEN, { ...(typeof all === "object" && all ? all : {}), [uid]: time }); },
 };
 
 async function upload(path, blob) {
@@ -118,5 +119,5 @@ export const api = {
   removeCover: (id) => request("DELETE", `/api/events/${id}/cover`),
   uploadPhoto: (id, blob) => upload(`/api/events/${id}/photos`, blob),
   removePhoto: (id, photoId) => request("DELETE", `/api/events/${id}/photos/${photoId}`),
-  notifications: () => request("POST", "/api/notifications", { tickets: myTickets.all().map((t) => t.code), follow: follows.all() }),
+  notifications: () => request("POST", "/api/notifications", { follow: follows.all() }),
 };

@@ -401,7 +401,21 @@ function lanUrls(req) {
 }
 
 /* ---------- notifications ---------- */
-function notificationsFor(data, req, body) {
+const MAX_NOTICES = 2000;
+function addNotice(d, to, item) {
+  d.notices = d.notices || [];
+  d.notices.push({ id: newId(), to: String(to).toLowerCase(), time: new Date().toISOString(), ...item });
+  if (d.notices.length > MAX_NOTICES) d.notices.splice(0, d.notices.length - MAX_NOTICES);
+}
+// "Reyes, Ana" from their student profile, or their email
+function personName(data, email) {
+  const p = Object.values(data.profiles || {}).find((x) => x.email === email);
+  return p ? `${p.first} ${p.last}` : email;
+}
+
+// For the signed-in account: its tickets, officer invitations, its orgs' events and officers, and followed calendars
+function notificationsFor(data, req, body, role) {
+  if (!req.user) return [];
   const now = Date.now();
   const DAY = 86400000;
   const items = [];
@@ -409,10 +423,9 @@ function notificationsFor(data, req, body) {
   const eventById = new Map(data.events.map((e) => [e.id, e]));
   const brief = (e) => ({ eventId: e.id, title: e.title });
 
-  // Tickets registered on this device
-  const codes = new Set((Array.isArray(body.tickets) ? body.tickets : []).slice(0, 200).map(String));
+  // This account's tickets
   for (const r of data.registrations) {
-    if (!codes.has(r.code)) continue;
+    if (r.userId !== req.user.id) continue;
     const e = eventById.get(r.eventId);
     if (!e) continue;
     const start = new Date(e.startsAt).getTime(), end = new Date(e.endsAt).getTime();
@@ -425,13 +438,35 @@ function notificationsFor(data, req, body) {
     if (r.checkin && photos.length && end < now) add(photos[photos.length - 1].uploadedAt, { kind: "photos", ...brief(e), text: photos.length === 1 ? `A photo from ${e.title} is up.` : `${photos.length} photos from ${e.title} are up.` });
   }
 
-  // Events this device hosts
+  // Officer invitations and roles, from orgs that are still active
+  const orgById = new Map((data.orgs || []).filter((o) => !o.disabled).map((o) => [o.id, o]));
+  for (const m of data.orgMembers || []) {
+    const org = orgById.get(m.orgId);
+    if (!org) continue;
+    if (m.email === req.user.email && role.role === "student") {
+      if (m.status === "invited") add(m.invitedAt, { kind: "invite", orgId: org.id, text: `${org.name} invited you to be an officer. Open your profile to accept or decline.` });
+      else if (m.acceptedAt) add(m.acceptedAt, { kind: "officer", orgId: org.id, text: `You're now an officer of ${org.name}. You can create and manage its events.` });
+    }
+    // The org account hears who accepted
+    if (role.role === "org" && role.org.id === org.id && m.status === "active" && m.acceptedAt) {
+      add(m.acceptedAt, { kind: "accepted", orgId: org.id, text: `${personName(data, m.email)} accepted your invitation and is now an officer.` });
+    }
+  }
+
+  // Notices sent to this account
+  for (const n of data.notices || []) {
+    if (n.to !== req.user.email) continue;
+    const { id, to, time, ...item } = n;
+    add(time, item);
+  }
+
+  // Events of the orgs this account runs or is an officer of
   for (const e of data.events) {
-    if (!canManage(req, e) || e.simulated) continue;
-    // Host notices
-    const ownKey = String(req.headers["x-selae-host-key"] || "").split(",").some((k) => k.trim() && hashKey(k.trim()) === e.hostKeyHash);
-    const soon = new Date(e.startsAt).getTime() - now < 3 * DAY;
-    if (!ownKey && !soon && new Date(e.endsAt).getTime() > now) continue;
+    if (!e.orgId || !req.orgIds.has(e.orgId) || e.simulated) continue;
+    // A teammate created an event for the org
+    if (e.createdBy && e.createdBy !== req.user.email && e.createdAt) {
+      add(e.createdAt, { kind: "orgEvent", ...brief(e), host: true, text: `${personName(data, e.createdBy)} created ${e.title} for ${e.hostName}.` });
+    }
     const regs = data.registrations.filter((r) => r.eventId === e.id && r.status !== "cancelled");
     const end = new Date(e.endsAt).getTime();
     if (regs.length && end > now) {
@@ -605,6 +640,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const member = (store.data.orgMembers || []).find((m) => m.id === id && m.orgId === org.id) || fail(404, "Officer not found.");
       return store.mutate((d) => {
         d.orgMembers = d.orgMembers.filter((m) => m !== member);
+        if (member.status === "active") addNotice(d, member.email, { kind: "removed", orgId: org.id, text: `${org.name} removed you as an officer.` });
         return { removed: true };
       });
     }],
@@ -617,7 +653,11 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       if (roleOf(store.data, user, admins).role !== "student") fail(403, "Only student accounts can be officers.");
       return store.mutate((d) => {
         if (answer === "accept") Object.assign(member, { status: "active", userId: user.id, acceptedAt: new Date().toISOString() });
-        else d.orgMembers = d.orgMembers.filter((m) => m !== member);
+        else {
+          d.orgMembers = d.orgMembers.filter((m) => m !== member);
+          const org = d.orgs.find((o) => o.id === member.orgId);
+          if (org) addNotice(d, org.email, { kind: "declined", orgId: org.id, text: `${personName(d, user.email)} declined your officer invitation.` });
+        }
         return { ok: true };
       });
     }],
@@ -625,7 +665,12 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     /* ---------- superadmin: organizations ---------- */
     ["GET", /^\/api\/admin\/orgs$/, (req) => {
       requireSuperadmin(req);
-      return { orgs: [...(store.data.orgs || [])].sort((a, b) => a.name.localeCompare(b.name)) };
+      const d = store.data;
+      const now = Date.now();
+      return { orgs: [...(d.orgs || [])].sort((a, b) => a.name.localeCompare(b.name)).map((o) => ({ ...o,
+        events: d.events.filter((e) => e.orgId === o.id).length,
+        upcoming: d.events.filter((e) => e.orgId === o.id && new Date(e.endsAt).getTime() > now).length,
+        officers: (d.orgMembers || []).filter((m) => m.orgId === o.id && m.status === "active").length })) };
     }],
 
     ["POST", /^\/api\/admin\/orgs$/, async (req) => {
@@ -736,7 +781,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     // Notifications
     ["POST", /^\/api\/notifications$/, async (req) => {
       const b = await readBody(req);
-      return { now: new Date().toISOString(), items: notificationsFor(store.data, req, b) };
+      return { now: new Date().toISOString(), items: notificationsFor(store.data, req, b, req.user ? roleOf(store.data, req.user, admins) : null) };
     }],
 
     ["POST", /^\/api\/events\/([\w-]+)\/register$/, async (req, [id]) => {
