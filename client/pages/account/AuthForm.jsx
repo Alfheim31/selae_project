@@ -139,7 +139,6 @@ export function AuthForm() {
       <button type="button" className="btn" onClick={signIn} style={{ padding: ".7rem 1rem" }}>
         <GoogleG /> Continue with Google
       </button>
-      <p className="text-xs faint" style={{ textAlign: "center" }}>Organization and admin accounts sign in with Google.</p>
     </AuthCard>
   );
 }
