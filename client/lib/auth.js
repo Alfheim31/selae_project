@@ -48,6 +48,13 @@ export async function passwordSignUp(email, password) {
   if (!supabase) throw new Error("Sign-in isn't set up on this server.");
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw new Error(error.message);
+  // An email that already has an account (password, Google, or an organization's) comes back
+  // with no identities, no error, and no email sent, so say so instead of waiting for a code
+  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    const e = new Error("This email already has an account. Sign in instead, or use Continue with Google if that's how you signed up.");
+    e.exists = true;
+    throw e;
+  }
   return !data.session;
 }
 

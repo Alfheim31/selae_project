@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, Mail } from "lucide-react";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
 import { Mark } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { passwordSignIn, passwordSignUp, resendEmailCode, signIn, verifyEmailCode } from "../../lib/auth.js";
+
+// Digits in the email code: Supabase → Authentication → Email → Email OTP Length (6 by default)
+const CODE_LENGTH = Number(import.meta.env.VITE_OTP_LENGTH) || 6;
+const EMPTY_CODE = () => Array(CODE_LENGTH).fill("");
+// Seconds before another code can be sent, so Supabase's email rate limit isn't hit
+const RESEND_WAIT = 60;
 
 export function AuthForm() {
   const [mode, setMode] = useState("signin");
@@ -13,12 +19,21 @@ export function AuthForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(EMPTY_CODE);
+  const [wait, setWait] = useState(0);
+  const checking = useRef(false);
   const [showPw, setShowPw] = useState(false);
   const [f, setF] = useState(EMPTY_STUDENT);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const creating = mode === "signup";
-  const switchTo = (m) => { setMode(m); setError(""); setNotice(""); setCode(""); };
+  // A code was just sent whenever this switches to "verify"
+  const switchTo = (m) => { setMode(m); setError(""); setNotice(""); setCode(EMPTY_CODE()); setWait(m === "verify" ? RESEND_WAIT : 0); };
+
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -40,23 +55,41 @@ export function AuthForm() {
       if (err.unconfirmed) {
         switchTo("verify");
         try { await resendEmailCode(email.trim()); } catch { /* the earlier code may still work */ }
+      } else if (err.exists) {
+        // Keep the email, move to Sign in, and drop the details typed for a new account
+        pendingStudent.clear();
+        switchTo("signin");
+        setError(err.message);
       } else setError(err.message);
     }
     setBusy(false);
   };
 
-  const verify = async (e) => {
-    e.preventDefault();
+  // Runs on the button, and by itself once the last digit is in
+  const verify = async (e, digits = code) => {
+    if (e) e.preventDefault();
+    if (checking.current) return;
     setError(""); setNotice("");
-    if (!/^\d{6,10}$/.test(code.trim())) { setError("Enter the code from the email."); return; }
+    const value = digits.join("");
+    if (value.length !== CODE_LENGTH) { setError(`Enter the ${CODE_LENGTH}-digit code from the email.`); return; }
+    checking.current = true;
     setBusy(true);
-    try { await verifyEmailCode(email.trim(), code.trim()); } catch (err) { setError(err.message); }
+    // On success the session changes and this page shows the profile
+    try { await verifyEmailCode(email.trim(), value); }
+    catch (err) { setError(err.message); setCode(EMPTY_CODE()); }
+    checking.current = false;
     setBusy(false);
   };
 
   const resend = async () => {
+    if (wait > 0) return;
     setError(""); setNotice("");
-    try { await resendEmailCode(email.trim()); setNotice("New code sent."); } catch (err) { setError(err.message); }
+    try {
+      await resendEmailCode(email.trim());
+      setNotice("New code sent.");
+      setCode(EMPTY_CODE());
+      setWait(RESEND_WAIT);
+    } catch (err) { setError(err.message); }
   };
 
   if (mode === "verify") {
@@ -71,16 +104,16 @@ export function AuthForm() {
               Enter it below to confirm it's yours. If you don't see it, check your spam folder.
             </p>
           </div>
-          <input className="inp mono" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} inputMode="numeric"
-            aria-label="Code from the email" autoComplete="one-time-code" maxLength={10} placeholder="••••••" autoFocus required
-            style={{ fontSize: "1.6rem", letterSpacing: ".4em", textAlign: "center", padding: ".7rem" }} />
+          <CodeBoxes value={code} onChange={setCode} onComplete={(digits) => verify(null, digits)} disabled={busy} invalid={Boolean(error)} />
           {error && <ErrorBox message={error} />}
           {notice && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600, textAlign: "center" }}>{notice}</p>}
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ padding: ".75rem 1rem" }}>
+          <button className="btn btn-primary" type="submit" disabled={busy || code.some((d) => !d)} style={{ padding: ".75rem 1rem" }}>
             {busy ? "Checking…" : "Confirm email"}
           </button>
           <div className="flex justify-center gap-2 flex-wrap">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={resend}>Send a new code</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={resend} disabled={wait > 0}>
+              {wait > 0 ? `Send a new code in ${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}` : "Send a new code"}
+            </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => switchTo("signup")}>Use a different email</button>
           </div>
         </form>
@@ -150,8 +183,63 @@ function AuthCard({ wide, children }) {
         .authicon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;
           background:var(--accent-soft);color:var(--accent)}
         .authsec{font-weight:700;font-size:.95rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+        .otp{display:flex;justify-content:center;gap:.5rem}
+        .otp input{flex:1;min-width:0;max-width:3.2rem;height:3.6rem;padding:0;text-align:center;font-size:1.6rem;font-weight:600;caret-color:var(--accent)}
+        .otp input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+        .otp.bad input{border-color:var(--bad, #c62f3a)}
       `}</style>
       {children}
+    </div>
+  );
+}
+
+// One box per digit. Typing moves to the next box, Backspace goes back, and a pasted
+// or autofilled code fills every box; the last digit hands the code to onComplete.
+function CodeBoxes({ value, onChange, onComplete, disabled, invalid }) {
+  const boxes = useRef([]);
+  const focus = (i) => {
+    const el = boxes.current[Math.max(0, Math.min(CODE_LENGTH - 1, i))];
+    if (el) { el.focus(); el.select(); }
+  };
+  // A fresh or cleared code starts at the first box
+  useEffect(() => { if (value.every((d) => !d)) focus(0); }, [value]);
+
+  const fill = (start, digits) => {
+    const next = value.slice();
+    let i = start;
+    for (const d of digits) { if (i >= CODE_LENGTH) break; next[i++] = d; }
+    onChange(next);
+    focus(i);
+    if (next.every(Boolean)) onComplete(next);
+  };
+
+  return (
+    <div className={`otp${invalid ? " bad" : ""}`} role="group" aria-label={`${CODE_LENGTH}-digit code from the email`}>
+      {value.map((d, i) => (
+        <input key={i} ref={(el) => { boxes.current[i] = el; }} className="inp mono" value={d} disabled={disabled}
+          inputMode="numeric" pattern="[0-9]*" autoComplete={i === 0 ? "one-time-code" : "off"} aria-label={`Digit ${i + 1}`}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => {
+            const digits = e.target.value.replace(/\D/g, "");
+            if (!digits) { const next = value.slice(); next[i] = ""; onChange(next); return; }
+            // Typing over a filled box keeps only the new digit; a phone's autofill brings the whole code
+            let typed = digits;
+            if (digits.length === 2 && d) typed = digits.startsWith(d) ? digits.slice(1) : digits.slice(0, 1);
+            fill(typed.length >= CODE_LENGTH ? 0 : i, typed);
+          }}
+          onPaste={(e) => {
+            e.preventDefault();
+            const digits = e.clipboardData.getData("text").replace(/\D/g, "");
+            if (digits) fill(digits.length >= CODE_LENGTH ? 0 : i, digits);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Backspace" && !d && i > 0) {
+              e.preventDefault();
+              const next = value.slice(); next[i - 1] = ""; onChange(next); focus(i - 1);
+            } else if (e.key === "ArrowLeft") { e.preventDefault(); focus(i - 1); }
+            else if (e.key === "ArrowRight") { e.preventDefault(); focus(i + 1); }
+          }} />
+      ))}
     </div>
   );
 }
