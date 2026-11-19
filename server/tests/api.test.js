@@ -349,6 +349,14 @@ test("a student fills in their profile once, and the face stays on the server", 
   assert.equal(me.profile.hasFace, true);
   assert.ok(!JSON.stringify(me).includes("faceDescriptor"));
 
+  // Create account asks first: taken for anyone else, free for its owner, and only a yes or no comes back
+  const free = async (id, opts) => (await call("GET", `/api/student-numbers/${encodeURIComponent(id)}`, undefined, opts)).json;
+  assert.deepEqual(await free("2024-12345"), { available: false });
+  assert.deepEqual(await free("2024 12345"), { available: false });
+  assert.deepEqual(await free("2024-12345", as("ana@gmail.com")), { available: true });
+  assert.deepEqual(await free("2024-54321"), { available: true });
+  assert.equal((await call("GET", "/api/student-numbers/abc")).status, 400);
+
   // One account per student number, and the school admin and org accounts aren't students
   assert.equal((await call("PUT", "/api/me/profile", details, as("ben@gmail.com"))).status, 409);
   assert.equal((await call("PUT", "/api/me/profile", { ...details, studentId: "2024-99999" }, as("boss@gmail.com"))).status, 403);

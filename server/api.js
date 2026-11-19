@@ -591,6 +591,17 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
   const routes = [
     ["GET", /^\/api\/info$/, (req) => ({ isLocal: isLocal(req), lanUrls: lanUrls(req) })],
 
+    // Before an account is made: is this student number still free? Answers only yes or no, never whose it is
+    ["GET", /^\/api\/student-numbers\/([^/]+)$/, (req, [raw]) => {
+      let typed = "";
+      try { typed = decodeURIComponent(raw); } catch { /* bad encoding: fails the format check */ }
+      const m = typed.trim().match(STUDENT_ID);
+      if (!m) fail(400, "Student number should look like 2024-12345.");
+      const id = `${m[1]}-${m[2]}`;
+      const taken = Object.values(store.data.profiles || {}).some((p) => p.studentId === id && (!req.user || p.userId !== req.user.id));
+      return { available: !taken };
+    }],
+
     ["GET", /^\/api\/me$/, (req) => {
       if (!req.user) return { user: null };
       const profile = (store.data.profiles || {})[req.user.id];

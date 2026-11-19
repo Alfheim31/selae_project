@@ -17,3 +17,6 @@ venv/
 __pycache__/
 dataset
 dataset_cropped
+
+# face-api's own recognition model, copied in by vite.config.js; the app uses selae_custom_face.onnx
+client/public/models/face_recognition_model*

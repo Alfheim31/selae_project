@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FaceCapture } from "../../components/FaceCapture.jsx";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
-import { formatName, tidyInitial, tidyName } from "../../components/shared.jsx";
+import { formatName, go, tidyInitial, tidyName } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
+import { signOut } from "../../lib/auth.js";
+
+const STUDENT_ID = /^(\d{4})\s*-?\s*(\d{5})$/;
 
 export function ProfileForm({ me, onSaved, required = false }) {
   const p = me.profile;
@@ -19,6 +22,20 @@ export function ProfileForm({ me, onSaved, required = false }) {
   const [done, setDone] = useState(false);
   const set = (k) => (e) => { setDone(false); setF((x) => ({ ...x, [k]: e.target.value })); };
   const hasFace = Boolean(faceDescriptor || (p && p.hasFace));
+
+  // Is the typed student number already another account's? Asked as soon as it's complete,
+  // so nobody does the face scan only to be turned away at Save
+  const [taken, setTaken] = useState(false);
+  useEffect(() => {
+    const m = f.studentId.trim().match(STUDENT_ID);
+    const id = m ? `${m[1]}-${m[2]}` : "";
+    if (!id || (p && p.studentId === id)) { setTaken(false); return; }
+    let stale = false;
+    const t = setTimeout(() => {
+      api.studentNumberFree(id).then(({ available }) => { if (!stale) setTaken(!available); }, () => { /* offline: Save still checks */ });
+    }, 400);
+    return () => { stale = true; clearTimeout(t); };
+  }, [f.studentId]); // eslint-disable-line react-hooks/exhaustive-deps
   const preview = useMemo(() => {
     const s = { first: tidyName(f.first), last: tidyName(f.last), middle: tidyInitial(f.middle), suffix: f.suffix };
     return s.first && s.last ? formatName(s) : "";
@@ -50,12 +67,22 @@ export function ProfileForm({ me, onSaved, required = false }) {
 
       <StudentFields f={f} set={set} />
 
-      <FaceCapture value={faceDescriptor} onChange={(d) => { setDone(false); setFaceDescriptor(d); }} onError={setError} saved={Boolean(p && p.hasFace)} />
+      {taken ? (
+        <div className="alert err" role="alert">
+          <strong>This student number already has an account.</strong> If it's yours, sign out and sign in to that account.
+          If it isn't, check the number, or ask an organizer for help.
+          <div style={{ marginTop: 8 }}>
+            <button type="button" className="btn btn-sm" onClick={async () => { await signOut(); go(""); }}>Sign out</button>
+          </div>
+        </div>
+      ) : (
+        <FaceCapture value={faceDescriptor} onChange={(d) => { setDone(false); setFaceDescriptor(d); }} onError={setError} saved={Boolean(p && p.hasFace)} />
+      )}
 
       {preview && <p className="text-sm muted">Guest lists will show you as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}
       {error && <ErrorBox message={error} />}
       {done && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600 }}>Saved.</p>}
-      <button className="btn btn-primary" type="submit" disabled={busy || !hasFace} style={{ padding: ".75rem 1rem", fontSize: "1.1rem" }}>
+      <button className="btn btn-primary" type="submit" disabled={busy || !hasFace || taken} style={{ padding: ".75rem 1rem", fontSize: "1.1rem" }}>
         {busy ? "Saving…" : "Save profile"}
       </button>
     </form>

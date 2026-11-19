@@ -4,6 +4,7 @@ import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx
 import { Mark } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
+import { api } from "../../lib/api.js";
 import { passwordSignIn, passwordSignUp, resendEmailCode, signIn, verifyEmailCode } from "../../lib/auth.js";
 
 // Digits in the email code: Supabase → Authentication → Email → Email OTP Length (6 by default)
@@ -44,10 +45,19 @@ export function AuthForm() {
       if (!f.first.trim() || !f.last.trim()) { setError("Enter your given name and surname."); return; }
       if (!/^\d{4}\s*-?\s*\d{5}$/.test(f.studentId.trim())) { setError("Student number should look like 2024-12345."); return; }
       if (!f.section.trim()) { setError("Enter your section."); return; }
-      pendingStudent.set(email.trim(), f);
     }
     setBusy(true);
     try {
+      // A student number belongs to one account; say so now, not after the email code and face scan
+      if (creating) {
+        const { available } = await api.studentNumberFree(f.studentId.trim());
+        if (!available) {
+          setError("This student number already has an account. Sign in to that account instead. If it isn't yours, ask an organizer for help.");
+          setBusy(false);
+          return;
+        }
+        pendingStudent.set(email.trim(), f);
+      }
       // On success the session changes and this page shows the profile
       if (!creating) await passwordSignIn(email.trim(), password);
       else if (await passwordSignUp(email.trim(), password)) switchTo("verify");
