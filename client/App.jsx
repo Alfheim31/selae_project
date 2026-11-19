@@ -30,13 +30,14 @@ export default function App() {
 
   // Legacy links
   useEffect(() => {
-    if (parts.length === 1 && LEGACY[parts[0]]) go(`m/demo-ga/${LEGACY[parts[0]]}`);
-    if (parts[0] === "host" && parts[1] && parts[2]) { hostKeys.add(parts[1], parts[2]); go(`m/${parts[1]}`); }
+    // Redirects replace the entry, so Back doesn't land on them and bounce forward again
+    if (parts.length === 1 && LEGACY[parts[0]]) go(`m/demo-ga/${LEGACY[parts[0]]}`, { replace: true });
+    if (parts[0] === "host" && parts[1] && parts[2]) { hostKeys.add(parts[1], parts[2]); go(`m/${parts[1]}`, { replace: true }); }
   }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Signed out: only Discover; the Events page is for signed-in accounts
   useEffect(() => {
-    if (me === null && (parts[0] === "events" || parts[0] === "tickets")) go("");
+    if (me === null && (parts[0] === "events" || parts[0] === "tickets")) go("", { replace: true });
   }, [me, route]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let page;

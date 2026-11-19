@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Compass, Plus } from "lucide-react";
 import { EventDrawer } from "../components/EventDrawer.jsx";
 import { EventPass } from "../components/EventPass.jsx";
-import { go, Trails } from "../components/shared.jsx";
+import { go, goBack, Trails } from "../components/shared.jsx";
 import { ErrorBox, PassListSkeleton, usePolled } from "../components/ui.jsx";
 import { useMe } from "../lib/account.js";
 import { api } from "../lib/api.js";
@@ -38,7 +38,7 @@ export function EventsHome({ drawerId }) {
           </div>
         ) : <EmptyItinerary past={tab === "past"} canHost={orgs.length > 0} />)}
       </div>
-      {drawerId && <EventDrawer id={drawerId} onClose={() => go("events")} />}
+      {drawerId && <EventDrawer id={drawerId} onClose={() => goBack("events", { replace: true })} />}
     </>
   );
 }

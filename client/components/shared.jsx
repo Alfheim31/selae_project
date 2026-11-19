@@ -281,6 +281,9 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .cand{display:flex;justify-content:space-between;align-items:center;gap:1rem;width:100%;text-align:left;
   background:rgba(255,255,255,.45);border:2px solid transparent;border-radius:12px;padding:.75rem 1rem;color:inherit}
 .cand:hover{border-color:currentColor;background:rgba(255,255,255,.62)}
+.cand-go{display:inline-flex;align-items:center;gap:.25rem;flex-shrink:0;padding:.45rem .8rem;border-radius:999px;
+  background:rgba(20,27,58,.82);color:#fff;font-weight:700;font-size:.85rem;text-transform:uppercase;letter-spacing:.04em}
+.cand:hover .cand-go{background:rgba(20,27,58,.95)}
 .suggest{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--surface);border:1px solid var(--line);
   border-radius:12px;overflow:hidden;z-index:5;box-shadow:0 18px 36px rgba(20,27,58,.2)}
 .suggest button{display:flex;justify-content:space-between;gap:1rem;width:100%;text-align:left;background:transparent;border:0;
@@ -469,7 +472,24 @@ export function useHashRoute() {
   }, []);
   return route;
 }
-export const go = (path) => { window.location.hash = `#/${path.replace(/^\//, "")}`; };
+/* Navigation. Each in-app step remembers the page it came from, so Back buttons can step back
+   instead of piling up history: closing a drawer or a "Back to …" link then costs one browser Back, not three. */
+const currentRoute = () => window.location.hash.replace(/^#\/?/, "");
+// replace: swap this history entry instead of adding one (redirects, tabs, closing a drawer)
+export const go = (path, { replace = false } = {}) => {
+  const to = path.replace(/^\//, "");
+  if (to === currentRoute()) return;
+  if (replace) window.history.replaceState(window.history.state, "", `#/${to}`);
+  else window.history.pushState({ selae: true, from: currentRoute() }, "", `#/${to}`);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+};
+// Back to `to`: steps back when that's where this page was opened from, otherwise goes there.
+// With no `to`, steps back to wherever SELAE came from, or Discover when the page was opened directly.
+export const goBack = (to, { replace = false } = {}) => {
+  const st = window.history.state;
+  if (st && st.selae && (to === undefined || st.from === to)) window.history.back();
+  else go(to === undefined ? "" : to, { replace });
+};
 
 export function useToast() {
   const [toast, setToast] = useState("");

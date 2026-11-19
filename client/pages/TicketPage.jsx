@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { flightNo, fmtDate, fmtTime, go, skyOf, Trails } from "../components/shared.jsx";
+import { flightNo, fmtDate, fmtTime, go, goBack, skyOf, Trails } from "../components/shared.jsx";
 import { ErrorBox, TicketSkeleton, usePolled } from "../components/ui.jsx";
 import { api, myTickets } from "../lib/api.js";
 
@@ -64,7 +64,7 @@ export function TicketPage({ code }) {
         </div>
       </div>
 
-      <button className="btn btn-primary" onClick={() => go(`e/${event.id}`)}>
+      <button className="btn btn-primary" onClick={() => goBack(`e/${event.id}`)}>
         <ArrowLeft size={17} /> Back to event page
       </button>
 

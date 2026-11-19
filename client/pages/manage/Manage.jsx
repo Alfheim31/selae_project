@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BarChart3, ExternalLink, Images, LayoutDashboard, QrCode as QrIcon, ScanLine, Settings, WifiOff, X } from "lucide-react";
 import { TopBar } from "../../components/TopBar.jsx";
-import { Barcode, flightNo, fmtDate, fmtTime, go, skyOf, Trails, useToast } from "../../components/shared.jsx";
+import { Barcode, flightNo, fmtDate, fmtTime, go, goBack, skyOf, Trails, useToast } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
 import { Analytics } from "./Analytics.jsx";
 import { Dashboard } from "./Dashboard.jsx";
@@ -84,7 +84,8 @@ export function Manage({ id, tab, scan }) {
   }
 
   const { event } = data;
-  const setTab = (t) => go(`m/${id}/${t}`);
+  // Tabs swap in place, so one Back leaves the event instead of walking through every tab
+  const setTab = (t) => go(`m/${id}/${t}`, { replace: true });
   const openScanner = () => go(`m/${id}/scan`);
   const nav = [
     { id: "dashboard", label: "Live dashboard", icon: LayoutDashboard },
@@ -120,7 +121,7 @@ export function Manage({ id, tab, scan }) {
           <div className="mt-auto flex flex-col gap-2">
             <Barcode value={event.id} height={28} color="rgba(255,255,255,.85)" />
             <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => go(`e/${id}`)}><ExternalLink size={16} /> Event page</button>
-            <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => go("events")}><ArrowLeft size={16} /> Your events</button>
+            <button className="navbtn" style={{ padding: ".4rem .2rem" }} onClick={() => goBack("events")}><ArrowLeft size={16} /> Your events</button>
           </div>
         </aside>
 
@@ -169,7 +170,13 @@ export function Manage({ id, tab, scan }) {
       </div>
 
       {scan && (
-        <ScannerModal event={event} locked={gateMode} onClose={() => { if (!gateMode) setTab(tab); }}>
+        <ScannerModal event={event} locked={gateMode} onClose={() => {
+          if (gateMode) return;
+          // Opened from a tab of this event: step back to it; opened by a link: swap in the dashboard
+          const st = window.history.state;
+          if (st && st.selae && String(st.from).startsWith(`m/${id}`)) window.history.back();
+          else setTab(tab);
+        }}>
           <Scanner data={data} eventId={id} refresh={refresh} gateMode={gateMode} setGateMode={setGateMode} />
         </ScannerModal>
       )}

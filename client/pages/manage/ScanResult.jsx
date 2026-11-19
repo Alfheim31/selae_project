@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  AlertTriangle, Ban, Brain, CalendarX, CheckCircle2, Clock, HelpCircle, History, Keyboard, ScanLine, UserPlus, WifiOff,
+  AlertTriangle, Ban, Brain, CalendarX, CheckCircle2, ChevronRight, Clock, HelpCircle, History, Keyboard, ScanLine, UserPlus, WifiOff,
 } from "lucide-react";
 import { SUFFIXES } from "../../components/StudentFields.jsx";
 import { fmtDateShort, fmtTime, formatName, METHOD_LABEL, pct } from "../../components/shared.jsx";
@@ -212,15 +212,18 @@ export function ResultPanel({ phase, result, camera, live, capacity, data, onAdd
           <p className="text-lg">{result.face
             ? "This face looks like someone on file, but not closely enough to decide alone. Compare the face with the names below, or check their student ID."
             : <>SELAE read <strong>{result.read}</strong> but isn't sure enough to decide alone. Check the ID and choose the matching student.</>}</p>
+          <p className="text-sm font-bold" style={{ marginBottom: -4 }}>Is it this student? Tap the right one to check them in.</p>
           <div className="flex flex-col gap-2">
             {result.candidates.filter((c) => c.p >= 0.01).map((c, i) => (
-              <button key={c.student.id} className="cand" onClick={() => onConfirm(c)} autoFocus={i === 0}>
-                <span>
+              <button key={c.student.id} className="cand" onClick={() => onConfirm(c)} autoFocus={i === 0}
+                aria-label={`Check in ${formatName(c.student)}, ${pct(c.p)} match`}>
+                <span className="min-w-0">
                   <span className="font-bold text-lg block">{formatName(c.student)}</span>
                   <span>{result.face ? <span className="mono">{c.student.id}</span> : <DigitDiff id={c.student.id} read={result.read} />}{c.student.section ? `, ${c.student.section}` : ""}</span>
                   {c.status !== "going" && <span className="block text-sm font-bold">{STATUS_NOTE[c.status]}</span>}
+                  <span className="block text-sm" style={{ opacity: .8 }}>{pct(c.p)} match</span>
                 </span>
-                <span className="font-bold">{pct(c.p)}</span>
+                <span className="cand-go">Check in <ChevronRight size={16} /></span>
               </button>
             ))}
           </div>

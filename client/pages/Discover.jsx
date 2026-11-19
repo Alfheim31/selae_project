@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { BellRing, Calendar, Search, UserPlus, X } from "lucide-react";
 import { EventDrawer } from "../components/EventDrawer.jsx";
 import { CATEGORIES, EventPass } from "../components/EventPass.jsx";
-import { fmtDate, fmtTime, go, skyOf, Trails } from "../components/shared.jsx";
+import { fmtDate, fmtTime, go, goBack, skyOf, Trails } from "../components/shared.jsx";
 import { DiscoverSkeleton, ErrorBox, usePolled } from "../components/ui.jsx";
 import { useMe } from "../lib/account.js";
 import { api, follows } from "../lib/api.js";
@@ -175,7 +175,7 @@ export function Discover({ drawerId }) {
           </section>
         )}
       </div>
-      {drawerId && <EventDrawer id={drawerId} onClose={() => go("")} />}
+      {drawerId && <EventDrawer id={drawerId} onClose={() => goBack("", { replace: true })} />}
     </>
   );
 }

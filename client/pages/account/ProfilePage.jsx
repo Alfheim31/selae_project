@@ -1,6 +1,6 @@
 import { LayoutGrid, LogOut, ShieldCheck } from "lucide-react";
 import { Avatar } from "../../components/AccountMenu.jsx";
-import { fmtDate, go, Trails } from "../../components/shared.jsx";
+import { fmtDate, go, goBack, Trails } from "../../components/shared.jsx";
 import { displayName, returnTo, ROLE_LABEL, useMe } from "../../lib/account.js";
 import { signOut } from "../../lib/auth.js";
 import { AuthForm } from "./AuthForm.jsx";
@@ -61,7 +61,7 @@ export function ProfilePage({ required = false }) {
       {back && ready && (
         <div className="panel p-4 flex items-center justify-between gap-3 flex-wrap" style={{ borderColor: "var(--accent)" }}>
           <span className="text-sm">{me.role === "student" ? "You're all set. Go back to the event to register." : "Go back to where you were."}</span>
-          <button className="btn btn-primary btn-sm" onClick={() => { returnTo.clear(); go(back); }}>Back to the event</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { returnTo.clear(); goBack(back); }}>Back to the event</button>
         </div>
       )}
       <div className="grid gap-5 items-start lg:grid-cols-[320px_1fr]">

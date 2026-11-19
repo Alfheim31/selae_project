@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, CheckCircle2, Clock, ScanLine, Settings, Ticket } from "lucide-react";
 import { categoryIcon, isLive } from "../components/EventPass.jsx";
 import { Lightbox } from "../components/Lightbox.jsx";
-import { Cover, fmtDate, fmtTime, formatName, go, skyOf } from "../components/shared.jsx";
+import { Cover, fmtDate, fmtTime, formatName, go, goBack, skyOf } from "../components/shared.jsx";
 import { ErrorBox, EventPageSkeleton, usePolled } from "../components/ui.jsx";
 import { api, myTickets } from "../lib/api.js";
 import { RegisterForm } from "./RegisterForm.jsx";
@@ -21,7 +21,7 @@ export function EventPage({ id }) {
 
   return (
     <div className="wrap py-6 md:py-8" style={{ maxWidth: 1080 }}>
-      <button className="btn btn-ghost btn-sm mb-4" onClick={() => (window.history.length > 1 ? window.history.back() : go("discover"))}><ArrowLeft size={16} /> Back</button>
+      <button className="btn btn-ghost btn-sm mb-4" onClick={() => goBack()}><ArrowLeft size={16} /> Back</button>
       <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] gap-8">
         <div className="flex flex-col gap-4">
           <Cover event={event} />
