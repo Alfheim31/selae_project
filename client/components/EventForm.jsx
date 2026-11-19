@@ -72,10 +72,12 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
     setBusy(true); setError(""); setSaved(false);
     const starts = new Date(f.startsAt), ends = new Date(f.endsAt);
     if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime())) { setError("Pick a start and end time."); setBusy(false); return; }
+    const capacity = Number(f.capacity);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 100000) { setError("Capacity must be a whole number from 1 to 100,000."); setBusy(false); return; }
     try {
       await onSubmit({
         title: f.title, ...(orgs ? { orgId: f.orgId } : initial && initial.org ? {} : { hostName: f.hostName }), venue: f.venue, description: f.description, color: f.color, visibility: f.visibility,
-        category: f.category, capacity: Number(f.capacity), startsAt: starts.toISOString(), endsAt: ends.toISOString(),
+        category: f.category, capacity, startsAt: starts.toISOString(), endsAt: ends.toISOString(),
         ...(showRegistrationToggle ? { registrationOpen: f.registrationOpen } : {}),
       }, cover);
       setSaved(true);
@@ -105,7 +107,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
         </div>
         <div className="flex flex-col gap-3">
           <label><span className="lbl">Event name</span>
-            <input className="inp" style={{ fontSize: "1.35rem", fontFamily: "var(--f-display)", fontWeight: 700 }} value={f.title} onChange={set("title")} placeholder="GDG Study Jam: Intro to Flutter" required /></label>
+            <input className="inp" style={{ fontSize: "1.35rem", fontFamily: "var(--f-display)", fontWeight: 700 }} value={f.title} onChange={set("title")} maxLength={120} placeholder="GDG Study Jam: Intro to Flutter" required /></label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label><span className="lbl">Hosted by</span>
               {orgs ? (
@@ -116,7 +118,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
               ) : initial && initial.org ? (
                 <input className="inp" value={initial.org.name} disabled title="Events stay with the organization that hosts them" />
               ) : (
-                <input className="inp" value={f.hostName} onChange={set("hostName")} placeholder="Your org's name" />
+                <input className="inp" value={f.hostName} onChange={set("hostName")} maxLength={80} placeholder="Your org's name" />
               )}
             </label>
             <label><span className="lbl">Category</span>
@@ -129,9 +131,12 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
             <label><span className="lbl">Starts</span><input className="inp" type="datetime-local" value={f.startsAt} onChange={set("startsAt")} required /></label>
             <label><span className="lbl">Ends</span><input className="inp" type="datetime-local" value={f.endsAt} onChange={set("endsAt")} required /></label>
           </div>
-          <label><span className="lbl">Venue</span><input className="inp" value={f.venue} onChange={set("venue")} placeholder="GV Room 301" required /></label>
+          <label><span className="lbl">Venue</span><input className="inp" value={f.venue} onChange={set("venue")} maxLength={120} placeholder="GV Room 301" required /></label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label><span className="lbl">Capacity</span><input className="inp" type="number" min="1" max="100000" value={f.capacity} onChange={set("capacity")} required /></label>
+            <label><span className="lbl">Capacity <span className="faint">(1 to 100,000)</span></span>
+              {/* Digits only: no minus sign, decimals, or "e"; anything above the limit is brought down to it */}
+              <input className="inp" type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={f.capacity} required
+                onChange={(e) => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setSaved(false); setF((x) => ({ ...x, capacity: v && Number(v) > 100000 ? "100000" : v })); }} /></label>
             <label><span className="lbl">Visibility</span>
               <select className="inp" value={f.visibility} onChange={set("visibility")}>
                 <option value="public">Public: listed on Discover</option>
@@ -140,7 +145,8 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
             </label>
           </div>
           <label><span className="lbl">Description <span className="faint">(optional)</span></span>
-            <textarea className="inp" value={f.description} onChange={set("description")} placeholder="What should attendees know or bring?" /></label>
+            <textarea className="inp" value={f.description} onChange={set("description")} maxLength={2000} placeholder="What should attendees know or bring?" />
+            <span className="text-xs faint" style={{ display: "block", textAlign: "right", marginTop: 4 }}>{(f.description || "").length}/2000</span></label>
           {showRegistrationToggle && (
             <label className="flex items-center gap-3 font-semibold">
               <input type="checkbox" checked={f.registrationOpen} onChange={set("registrationOpen")} style={{ width: 20, height: 20, accentColor: "var(--accent)" }} />

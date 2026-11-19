@@ -135,7 +135,7 @@ export function OrgsPanel() {
           {all.length > 0 && (
             <label className="field" style={{ width: "min(360px, 100%)" }}>
               <Search size={16} />
-              <input className="input" placeholder="Search name or email" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} />
+              <input className="input" placeholder="Search name or email" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} maxLength={80} />
             </label>
           )}
         </div>
@@ -244,10 +244,10 @@ function NewOrg({ onAdded }) {
       <div className="flex flex-col gap-3" style={{ padding: "0 1.2rem 1.2rem" }}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.2fr_1fr_auto] gap-3 items-end">
           <label><span className="lbl">Organization name</span>
-            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Computer Science Society" required />
+            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Computer Science Society" required />
           </label>
           <label><span className="lbl">Official email</span>
-            <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="css.official@gmail.com" required />
+            <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} placeholder="css.official@gmail.com" required />
           </label>
           <label><span className="lbl">Kind</span>
             <select className="inp" value={type} onChange={(e) => setType(e.target.value)} required>
@@ -309,8 +309,8 @@ function OrgCard({ org, onChange, onCredentials }) {
       </div>
       {editing ? (
         <form onSubmit={submitEdit} className="flex flex-col gap-3" noValidate style={{ padding: "1rem" }}>
-          <label><span className="lbl">Organization name</span><input className="inp" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></label>
-          <label><span className="lbl">Official email</span><input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+          <label><span className="lbl">Organization name</span><input className="inp" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoFocus /></label>
+          <label><span className="lbl">Official email</span><input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} /></label>
           <label><span className="lbl">Kind</span>
             <select className="inp" value={type} onChange={(e) => setType(e.target.value)}>
               {!org.type && <option value="">Uncategorized</option>}

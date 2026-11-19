@@ -207,8 +207,8 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
   box-shadow:-24px 0 48px -16px rgba(20,27,58,.35);animation:slidein .28s cubic-bezier(.2,.8,.2,1)}
 .drawer .dhead{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.75rem 1rem;border-bottom:1px solid var(--line);background:var(--surface)}
 .drawer .dbody{flex:1;overflow:auto;padding:1rem 1rem 1.5rem}
-.drawer .dfoot{display:flex;gap:.6rem;padding:.85rem 1rem;border-top:1px solid var(--line);background:var(--surface)}
-.drawer .dfoot .btn{flex:1}
+.drawer .dfoot{display:flex;flex-wrap:wrap;gap:.6rem;padding:.85rem 1rem;border-top:1px solid var(--line);background:var(--surface)}
+.drawer .dfoot .btn{flex:1 1 130px;min-width:0;white-space:nowrap}
 @keyframes slidein{from{transform:translateX(100%)}to{transform:translateX(0)}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 /* organizer console */

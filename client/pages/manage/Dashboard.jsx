@@ -112,7 +112,7 @@ export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
               </div>
               <label className="field w-full">
                 <Search size={17} />
-                <input className="input" placeholder="Search by name or student number, e.g. pena or 2024-" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input className="input" placeholder="Search by name or student number, e.g. pena or 2024-" value={q} onChange={(e) => setQ(e.target.value)} maxLength={80} />
               </label>
             </div>
             <div style={{ maxHeight: 420, overflow: "auto", borderTop: "1px solid var(--line)" }}>

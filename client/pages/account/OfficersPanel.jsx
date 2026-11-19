@@ -38,7 +38,7 @@ export function OfficersPanel() {
       </div>
 
       <form onSubmit={invite} className="flex gap-2 flex-wrap" noValidate>
-        <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@gmail.com"
+        <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} placeholder="student@gmail.com"
           aria-label="Student's email" style={{ flex: "1 1 220px" }} required />
         <button className="btn btn-primary" type="submit" disabled={busy || !email.trim()}><UserPlus size={17} /> {busy ? "Inviting…" : "Invite"}</button>
       </form>

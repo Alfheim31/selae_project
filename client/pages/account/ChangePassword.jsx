@@ -45,7 +45,7 @@ export function ChangePasswordPage({ me, onDone }) {
         </div>
         <label><span className="lbl">New password</span>
           <span style={{ position: "relative", display: "block" }}>
-            <input className="inp" type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+            <input className="inp" type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} maxLength={72}
               autoComplete="new-password" autoFocus required style={{ paddingRight: "2.8rem" }} />
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShow((x) => !x)} aria-label={show ? "Hide password" : "Show password"}
               style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", padding: ".3rem .45rem" }}>
@@ -54,7 +54,7 @@ export function ChangePasswordPage({ me, onDone }) {
           </span>
         </label>
         <label><span className="lbl">Type it again</span>
-          <input className="inp" type={show ? "text" : "password"} value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" required />
+          <input className="inp" type={show ? "text" : "password"} value={again} onChange={(e) => setAgain(e.target.value)} maxLength={72} autoComplete="new-password" required />
         </label>
         <ul className="text-sm flex flex-col gap-1">
           {[...RULES, ["Both match", () => password && password === again]].map(([label, test]) => {

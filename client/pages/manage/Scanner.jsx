@@ -506,7 +506,7 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
             <label htmlFor="manual" className="flex items-center gap-2 font-bold mb-2"><Keyboard size={17} /> Manual entry</label>
             <div className="field" style={{ position: "relative" }}>
               <Search size={17} />
-              <input id="manual" ref={inputRef} className="input" autoComplete="off" value={q}
+              <input id="manual" ref={inputRef} className="input" autoComplete="off" value={q} maxLength={60}
                 placeholder="Type a student number or name, e.g. 2024- or dela cruz"
                 onChange={(e) => { setQ(e.target.value); setActive(0); }}
                 onKeyDown={(e) => {

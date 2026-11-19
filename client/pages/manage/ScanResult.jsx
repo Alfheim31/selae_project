@@ -55,19 +55,19 @@ function AddStudentForm({ result, data, onAdd, onManual, onReset }) {
       <p>{result.message}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="sm:col-span-2"><span className="lbl">Student number</span>
-          <input className="inp mono" value={f.studentId} onChange={set("studentId")} placeholder="2024-12345" inputMode="numeric" autoComplete="off" required /></label>
+          <input className="inp mono" value={f.studentId} onChange={set("studentId")} maxLength={11} placeholder="2024-12345" inputMode="numeric" autoComplete="off" required /></label>
         <label><span className="lbl">Given name</span>
-          <input className="inp" value={v.first} onChange={set("first")} readOnly={Boolean(onFile)} autoFocus={!onFile} autoComplete="off" required /></label>
+          <input className="inp" value={v.first} onChange={set("first")} maxLength={60} readOnly={Boolean(onFile)} autoFocus={!onFile} autoComplete="off" required /></label>
         <label><span className="lbl">Surname</span>
-          <input className="inp" value={v.last} onChange={set("last")} readOnly={Boolean(onFile)} autoComplete="off" required /></label>
+          <input className="inp" value={v.last} onChange={set("last")} maxLength={60} readOnly={Boolean(onFile)} autoComplete="off" required /></label>
         <label><span className="lbl">Middle initial (optional)</span>
-          <input className="inp" value={v.middle} onChange={set("middle")} readOnly={Boolean(onFile)} autoComplete="off" /></label>
+          <input className="inp" value={v.middle} onChange={set("middle")} maxLength={60} readOnly={Boolean(onFile)} autoComplete="off" /></label>
         <label><span className="lbl">Suffix (optional)</span>
           <select className="inp" value={v.suffix} onChange={set("suffix")} disabled={Boolean(onFile)}>
             {SUFFIXES.map((s) => <option key={s} value={s}>{s || "None"}</option>)}
           </select></label>
         <label className="sm:col-span-2"><span className="lbl">Section</span>
-          <input className="inp" value={v.section} onChange={set("section")} readOnly={Boolean(onFile)} placeholder="BSCS 3-4" autoComplete="off" required /></label>
+          <input className="inp" value={v.section} onChange={set("section")} maxLength={30} readOnly={Boolean(onFile)} placeholder="BSCS 3-4" autoComplete="off" required /></label>
       </div>
       {onFile && <p className="text-sm font-bold">{reg ? "Already on the guest list." : "Already on file, so the name and section stay as they are."}</p>}
       {full && <p className="text-sm font-bold">This event is full, so they'll go on the waitlist instead of checking in.</p>}

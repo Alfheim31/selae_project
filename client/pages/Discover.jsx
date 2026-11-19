@@ -59,7 +59,7 @@ export function Discover({ drawerId }) {
             </p>
             <label className="field mt-5" style={{ maxWidth: 520, display: "block" }}>
               <Search size={18} />
-              <input className="input" placeholder="Search events, hosts or venues" value={q} onChange={(e) => setQ(e.target.value)}
+              <input className="input" placeholder="Search events, hosts or venues" value={q} onChange={(e) => setQ(e.target.value)} maxLength={80}
                 style={{ border: 0, boxShadow: "0 12px 30px -12px rgba(20,27,58,.45)" }} />
             </label>
           </div>

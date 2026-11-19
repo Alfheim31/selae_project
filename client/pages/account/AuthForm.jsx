@@ -155,12 +155,12 @@ export function AuthForm() {
           </>
         )}
         <label><span className="lbl">Email</span>
-          <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+          <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} autoComplete="email"
             placeholder="you@gmail.com" required />
         </label>
         <label><span className="lbl">Password {creating && <span className="faint">(at least 8 characters)</span>}</span>
           <span style={{ position: "relative", display: "block" }}>
-            <input className="inp" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+            <input className="inp" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} maxLength={72}
               autoComplete={creating ? "new-password" : "current-password"} required style={{ paddingRight: "2.8rem" }} />
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPw((x) => !x)}
               aria-label={showPw ? "Hide password" : "Show password"}
