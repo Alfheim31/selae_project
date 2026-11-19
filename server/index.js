@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -17,6 +18,23 @@ const api = createApi(store);
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm",
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2", ".woff": "font/woff", ".jpg": "image/jpeg", ".webp": "image/webp" };
 
+// Face and OCR models (the face model alone is 94 MB) keep their names when retrained, so they can't be
+// cached forever like /assets. Phones keep them for a day, then ask again; the ETag is a hash of the
+// content, so an unchanged model costs a 304 instead of a download, even after a redeploy.
+const MODEL_DIRS = [`${path.sep}models${path.sep}`, `${path.sep}tesseract${path.sep}`];
+const etags = new Map();
+function etagOf(file, stat) {
+  const key = `${file}:${stat.size}:${stat.mtimeMs}`;
+  if (!etags.has(key)) {
+    etags.set(key, new Promise((resolve, reject) => {
+      const hash = crypto.createHash("sha256");
+      fs.createReadStream(file).on("data", (c) => hash.update(c)).on("error", reject)
+        .on("end", () => resolve(`"${hash.digest("base64url").slice(0, 27)}"`));
+    }).catch((e) => { etags.delete(key); throw e; }));
+  }
+  return etags.get(key);
+}
+
 if (!fs.existsSync(path.join(dist, "index.html"))) {
   console.error("No build found. Run `npm start` (it builds first) or `npm run build`.");
   process.exit(1);
@@ -33,6 +51,12 @@ http.createServer(async (req, res) => {
     if (!file.startsWith(dist) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dist, "index.html");
     res.setHeader("Content-Type", TYPES[path.extname(file)] || "application/octet-stream");
     if (file.includes(`${path.sep}assets${path.sep}`)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    else if (MODEL_DIRS.some((d) => file.includes(d))) {
+      const etag = await etagOf(file, fs.statSync(file));
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("ETag", etag);
+      if (String(req.headers["if-none-match"] || "").split(/\s*,\s*/).includes(etag)) { res.statusCode = 304; res.end(); return; }
+    }
     fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.statusCode = 500; res.end(); }).pipe(res);
   } catch (e) {
     // Request errors
