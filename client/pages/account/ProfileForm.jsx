@@ -17,6 +17,8 @@ export function ProfileForm({ me, onSaved, required = false }) {
   });
   const fromSignUp = !p && Boolean(pendingStudent.get(me.email));
   const [faceDescriptor, setFaceDescriptor] = useState(null);
+  // Data privacy consent for the face scan; a saved face was consented to when it was first scanned
+  const [consent, setConsent] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -45,7 +47,7 @@ export function ProfileForm({ me, onSaved, required = false }) {
     if (!hasFace) { setError("Please complete the facial scan before saving."); return; }
     setBusy(true); setError("");
     try {
-      await api.saveProfile({ ...f, faceDescriptor });
+      await api.saveProfile({ ...f, faceDescriptor, faceConsent: Boolean(faceDescriptor) && (consent === true || Boolean(p && p.hasFace)) });
       pendingStudent.clear();
       setFaceDescriptor(null);
       // The first save unlocks the app and this page goes away, so the pop-up lives at the app level
@@ -76,7 +78,8 @@ export function ProfileForm({ me, onSaved, required = false }) {
           </div>
         </div>
       ) : (
-        <FaceCapture value={faceDescriptor} onChange={setFaceDescriptor} onError={setError} saved={Boolean(p && p.hasFace)} />
+        <FaceCapture value={faceDescriptor} onChange={setFaceDescriptor} onError={setError} saved={Boolean(p && p.hasFace)}
+          consent={consent} onConsent={setConsent} onSignOut={async () => { await signOut(); go(""); }} />
       )}
 
       {preview && <p className="text-sm muted">Guest lists will show you as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}

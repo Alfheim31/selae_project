@@ -301,7 +301,7 @@ test("face data is checked at registration and at the gate", async (t) => {
   const bad = [face(0).slice(0, 127), [...face(0).slice(0, 127), "x"], [...face(0).slice(0, 127), null], "nope"];
   const profile = { studentId: "2099-00009", first: "Ana", last: "Reyes", section: "A" };
   for (const descriptor of bad) {
-    assert.equal((await call("PUT", "/api/me/profile", { ...profile, faceDescriptor: descriptor }, { headers: { authorization: "Bearer s:x" } })).status, 400);
+    assert.equal((await call("PUT", "/api/me/profile", { ...profile, faceDescriptor: descriptor, faceConsent: true }, { headers: { authorization: "Bearer s:x" } })).status, 400);
     assert.equal((await call("POST", `/api/events/${id}/match-face`, { descriptor }, { from: LAPTOP })).status, 400);
   }
   // Only hosts can run face matching
@@ -335,8 +335,11 @@ test("a student fills in their profile once, and the face stays on the server", 
 
   assert.equal((await call("PUT", "/api/me/profile", details)).status, 401);
 
-  const saved = await call("PUT", "/api/me/profile", { ...details, faceDescriptor: face }, as("ana@gmail.com"));
+  // A face scan needs the data privacy consent, and when it was given is kept
+  assert.equal((await call("PUT", "/api/me/profile", { ...details, faceDescriptor: face }, as("ana@gmail.com"))).status, 400);
+  const saved = await call("PUT", "/api/me/profile", { ...details, faceDescriptor: face, faceConsent: true }, as("ana@gmail.com"));
   assert.equal(saved.status, 200);
+  assert.ok(Date.parse(saved.json.profile.faceConsentAt) > 0);
   assert.equal(saved.json.profile.first, "Ana");
   assert.equal(saved.json.profile.section, "BSCS 3-4");
   assert.equal(saved.json.profile.hasFace, true);
@@ -347,6 +350,7 @@ test("a student fills in their profile once, and the face stays on the server", 
   const me = (await call("GET", "/api/me", null, as("ana@gmail.com"))).json.user;
   assert.equal(me.profile.first, "Anna");
   assert.equal(me.profile.hasFace, true);
+  assert.equal(me.profile.faceConsentAt, saved.json.profile.faceConsentAt);
   assert.ok(!JSON.stringify(me).includes("faceDescriptor"));
 
   // Create account asks first: taken for anyone else, free for its owner, and only a yes or no comes back

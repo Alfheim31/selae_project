@@ -638,14 +638,18 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const b = await readBody(req);
       const student = studentFields(b);
       const face = faceFrom(b.faceDescriptor);
+      // A new face scan needs the data privacy consent (RA 10173); when it was given is kept as the record
+      if (face && b.faceConsent !== true) fail(400, "Agree to the data privacy notice before saving your face scan.");
       const taken = Object.values(store.data.profiles || {}).find((p) => p.studentId === student.id && p.userId !== user.id);
       if (taken) fail(409, "Another account already uses this student number. If it's yours, ask an organizer for help.");
       return store.mutate((d) => {
         d.profiles = d.profiles || {};
         const before = d.profiles[user.id];
         const { id: studentId, ...name } = student;
+        const now = new Date().toISOString();
         d.profiles[user.id] = { id: user.id, userId: user.id, email: user.email, studentId, ...name,
-          faceDescriptor: face || (before && before.faceDescriptor) || null, updatedAt: new Date().toISOString() };
+          faceDescriptor: face || (before && before.faceDescriptor) || null,
+          faceConsentAt: face ? now : (before && before.faceConsentAt) || null, updatedAt: now };
         if (face) {
           const ended = new Set(d.events.filter((e) => Date.now() > new Date(e.endsAt).getTime()).map((e) => e.id));
           for (const r of d.registrations) if (r.userId === user.id && !ended.has(r.eventId)) r.faceDescriptor = face;
@@ -851,7 +855,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       if (roleOf(store.data, user, admins).role !== "student") fail(403, "Sign in with a student account to register.");
       const profile = (store.data.profiles || {})[user.id] || fail(409, "Set up your student profile first.");
       if (!Array.isArray(profile.faceDescriptor)) fail(409, "Scan your face in your profile first.");
-      const { id: _pid, userId: _uid, email: _email, studentId, faceDescriptor, updatedAt: _at, ...name } = profile;
+      const { id: _pid, userId: _uid, email: _email, studentId, faceDescriptor, faceConsentAt: _consent, updatedAt: _at, ...name } = profile;
       const student = { id: studentId, ...name };
 
       const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");
