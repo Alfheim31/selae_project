@@ -481,6 +481,18 @@ export function useToast() {
   return [toast, setToast];
 }
 
+// App-wide pop-up that survives a page change: call toast("Saved.") anywhere; App renders <Toaster />
+export const toast = (message) => window.dispatchEvent(new CustomEvent("selae:toast", { detail: message }));
+export function Toaster() {
+  const [message, setMessage] = useToast();
+  useEffect(() => {
+    const show = (e) => setMessage(e.detail);
+    window.addEventListener("selae:toast", show);
+    return () => window.removeEventListener("selae:toast", show);
+  }, [setMessage]);
+  return message ? <div className="toast" role="status">{message}</div> : null;
+}
+
 /* Image resize before upload */
 export async function prepareImage(file, { max = 1800, quality = 0.84 } = {}) {
   if (!file || !/^image\//.test(file.type)) throw new Error("Choose an image file (JPEG, PNG or WebP).");

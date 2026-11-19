@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaceCapture } from "../../components/FaceCapture.jsx";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
-import { formatName, go, tidyInitial, tidyName } from "../../components/shared.jsx";
+import { formatName, go, tidyInitial, tidyName, toast } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
@@ -19,8 +19,7 @@ export function ProfileForm({ me, onSaved, required = false }) {
   const [faceDescriptor, setFaceDescriptor] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [done, setDone] = useState(false);
-  const set = (k) => (e) => { setDone(false); setF((x) => ({ ...x, [k]: e.target.value })); };
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const hasFace = Boolean(faceDescriptor || (p && p.hasFace));
 
   // Is the typed student number already another account's? Asked as soon as it's complete,
@@ -44,12 +43,13 @@ export function ProfileForm({ me, onSaved, required = false }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!hasFace) { setError("Please complete the facial scan before saving."); return; }
-    setBusy(true); setError(""); setDone(false);
+    setBusy(true); setError("");
     try {
       await api.saveProfile({ ...f, faceDescriptor });
       pendingStudent.clear();
       setFaceDescriptor(null);
-      setDone(true);
+      // The first save unlocks the app and this page goes away, so the pop-up lives at the app level
+      toast(p && p.hasFace ? "Profile saved." : "Profile saved. You're all set for events.");
       onSaved();
     } catch (err) { setError(err.message); }
     setBusy(false);
@@ -76,12 +76,11 @@ export function ProfileForm({ me, onSaved, required = false }) {
           </div>
         </div>
       ) : (
-        <FaceCapture value={faceDescriptor} onChange={(d) => { setDone(false); setFaceDescriptor(d); }} onError={setError} saved={Boolean(p && p.hasFace)} />
+        <FaceCapture value={faceDescriptor} onChange={setFaceDescriptor} onError={setError} saved={Boolean(p && p.hasFace)} />
       )}
 
       {preview && <p className="text-sm muted">Guest lists will show you as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}
       {error && <ErrorBox message={error} />}
-      {done && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600 }}>Saved.</p>}
       <button className="btn btn-primary" type="submit" disabled={busy || !hasFace || taken} style={{ padding: ".75rem 1rem", fontSize: "1.1rem" }}>
         {busy ? "Saving…" : "Save profile"}
       </button>
