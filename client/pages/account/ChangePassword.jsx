@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Check, Eye, EyeOff, KeyRound, LogOut } from "lucide-react";
-import { go, Mark } from "../../components/shared.jsx";
+import { go, Mark, toast } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { api } from "../../lib/api.js";
-import { signOut } from "../../lib/auth.js";
+import { passwordReset, signOut } from "../../lib/auth.js";
 
 const RULES = [
   ["At least 8 characters", (p) => p.length >= 8],
   ["Letters and numbers", (p) => /[A-Za-z]/.test(p) && /\d/.test(p)],
 ];
 
-// Shown instead of every page while the account still has the temporary password that was emailed to it
-export function ChangePasswordPage({ me, onDone }) {
+// Shown instead of every page while the account still has the temporary password that was emailed to it,
+// or right after a forgot-password code signed the person in (`reset`)
+export function ChangePasswordPage({ me, onDone, reset = false }) {
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [show, setShow] = useState(false);
@@ -25,7 +26,9 @@ export function ChangePasswordPage({ me, onDone }) {
     setBusy(true); setError("");
     try {
       await api.changePassword(password);
+      passwordReset.clear();
       await onDone();
+      toast("Password changed.");
       go("profile");
     } catch (err) { setError(err.message); setBusy(false); }
   };
@@ -37,10 +40,14 @@ export function ChangePasswordPage({ me, onDone }) {
         <div className="flex flex-col items-center gap-2" style={{ textAlign: "center" }}>
           <span style={{ width: 56, height: 56, borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center",
             background: "var(--accent-soft)", color: "var(--accent)" }}><KeyRound size={26} /></span>
-          <h1 className="panel-title" style={{ fontSize: "1.5rem" }}>Choose your own password</h1>
+          <h1 className="panel-title" style={{ fontSize: "1.5rem" }}>{reset ? "Set a new password" : "Choose your own password"}</h1>
           <p className="muted text-sm">
-            You signed in to <strong style={{ color: "var(--text)" }}>{me.org ? me.org.name : me.email}</strong> with the
-            temporary password from your email. Set a new one to keep the account safe. Only you will know it.
+            {reset ? (
+              <>The code checked out. Choose a new password for <strong style={{ color: "var(--text)", overflowWrap: "anywhere" }}>{me.org ? me.org.name : me.email}</strong>.</>
+            ) : (
+              <>You signed in to <strong style={{ color: "var(--text)" }}>{me.org ? me.org.name : me.email}</strong> with the
+                temporary password from your email. Set a new one to keep the account safe. Only you will know it.</>
+            )}
           </p>
         </div>
         <label><span className="lbl">New password</span>

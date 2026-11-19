@@ -38,6 +38,33 @@ export async function verifyEmailCode(email, code) {
   if (error) throw new Error(/expired|invalid/i.test(error.message) ? "That code is wrong or has expired. Check the latest email, or send a new code." : error.message);
 }
 
+// Forgot password: Supabase emails a code ("Reset Password" template needs {{ .Token }}).
+// It answers the same whether or not the email has an account, so nobody can probe for accounts.
+export async function sendPasswordResetCode(email) {
+  if (!supabase) throw new Error("Sign-in isn't set up on this server.");
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + window.location.pathname });
+  if (error) throw new Error(error.message);
+}
+
+// Signed in by a password-reset code (or the email's link): the app asks for a new password before anything else.
+// Kept for this tab only, so closing it doesn't leave the next visit stuck on that page.
+const RESET = "selae.passwordReset";
+export const passwordReset = {
+  get() { try { return sessionStorage.getItem(RESET) === "1"; } catch { return false; } },
+  set() { try { sessionStorage.setItem(RESET, "1"); } catch { /* private mode */ } },
+  clear() { try { sessionStorage.removeItem(RESET); } catch { /* private mode */ } },
+};
+
+// A correct code signs the person in; the new password is chosen on the next page
+export async function verifyResetCode(email, code) {
+  passwordReset.set();
+  const { error } = await supabase.auth.verifyOtp({ email, token: code, type: "recovery" });
+  if (error) {
+    passwordReset.clear();
+    throw new Error(/expired|invalid/i.test(error.message) ? "That code is wrong or has expired. Check the latest email, or send a new code." : error.message);
+  }
+}
+
 export async function resendEmailCode(email) {
   const { error } = await supabase.auth.resend({ type: "signup", email });
   if (error) throw new Error(error.message);
@@ -59,6 +86,7 @@ export async function passwordSignUp(email, password) {
 }
 
 export async function signOut() {
+  passwordReset.clear();
   if (supabase) await supabase.auth.signOut();
 }
 
@@ -78,7 +106,10 @@ export function useSession() {
       // Drop ?code= from the address bar after login
       if (window.location.search) window.history.replaceState(null, "", window.location.pathname + window.location.hash);
     });
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") passwordReset.set();
+      setSession(s);
+    });
     return () => data.subscription.unsubscribe();
   }, []);
   return session;

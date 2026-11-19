@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, Mail } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, KeyRound, Mail } from "lucide-react";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
 import { Mark } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
-import { passwordSignIn, passwordSignUp, resendEmailCode, signIn, verifyEmailCode } from "../../lib/auth.js";
+import {
+  passwordSignIn, passwordSignUp, resendEmailCode, sendPasswordResetCode, signIn, verifyEmailCode, verifyResetCode,
+} from "../../lib/auth.js";
 
 // Digits in the email code: Supabase → Authentication → Email → Email OTP Length (6 by default)
 const CODE_LENGTH = Number(import.meta.env.VITE_OTP_LENGTH) || 6;
@@ -27,8 +29,11 @@ export function AuthForm() {
   const [f, setF] = useState(EMPTY_STUDENT);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const creating = mode === "signup";
-  // A code was just sent whenever this switches to "verify"
-  const switchTo = (m) => { setMode(m); setError(""); setNotice(""); setCode(EMPTY_CODE()); setWait(m === "verify" ? RESEND_WAIT : 0); };
+  // A code was just sent whenever this switches to "verify" or "reset"
+  const switchTo = (m) => {
+    setMode(m); setError(""); setNotice(""); setCode(EMPTY_CODE());
+    setWait(m === "verify" || m === "reset" ? RESEND_WAIT : 0);
+  };
 
   useEffect(() => {
     if (wait <= 0) return;
@@ -102,6 +107,90 @@ export function AuthForm() {
     } catch (err) { setError(err.message); }
   };
 
+  // Forgot password, step 1: send a code to the email
+  const sendReset = async (e) => {
+    if (e) e.preventDefault();
+    setError(""); setNotice("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
+    setBusy(true);
+    try { await sendPasswordResetCode(email.trim()); switchTo("reset"); }
+    catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+
+  // Step 2: the code. A correct one signs them in, and the app then asks for the new password (ChangePassword.jsx).
+  const checkReset = async (e, digits = code) => {
+    if (e) e.preventDefault();
+    if (checking.current) return;
+    setError(""); setNotice("");
+    const value = digits.join("");
+    if (value.length !== CODE_LENGTH) { setError(`Enter the ${CODE_LENGTH}-digit code from the email.`); return; }
+    checking.current = true;
+    setBusy(true);
+    try { await verifyResetCode(email.trim(), value); }
+    catch (err) { setError(err.message); setCode(EMPTY_CODE()); }
+    checking.current = false;
+    setBusy(false);
+  };
+
+  const resendReset = async () => {
+    if (wait > 0) return;
+    setError(""); setNotice("");
+    try {
+      await sendPasswordResetCode(email.trim());
+      setNotice("New code sent.");
+      setCode(EMPTY_CODE());
+      setWait(RESEND_WAIT);
+    } catch (err) { setError(err.message); }
+  };
+
+  if (mode === "forgot") {
+    return (
+      <AuthCard>
+        <form onSubmit={sendReset} className="flex flex-col gap-4" noValidate>
+          <div className="flex flex-col items-center gap-2" style={{ textAlign: "center" }}>
+            <span className="authicon"><KeyRound size={24} /></span>
+            <h1 className="panel-title">Forgot your password?</h1>
+            <p className="muted text-sm">Enter your account's email and we'll send you a code to set a new password.</p>
+          </div>
+          <label><span className="lbl">Email</span>
+            <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} autoComplete="email"
+              placeholder="you@gmail.com" autoFocus required />
+          </label>
+          {error && <ErrorBox message={error} />}
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ padding: ".75rem 1rem" }}>
+            {busy ? "Sending…" : "Send code"}
+          </button>
+          <button type="button" className="linkbtn self-center text-sm" onClick={() => switchTo("signin")}><ArrowLeft size={15} /> Back to sign in</button>
+        </form>
+      </AuthCard>
+    );
+  }
+
+  if (mode === "reset") {
+    return (
+      <AuthCard>
+        <form onSubmit={checkReset} className="flex flex-col gap-4" noValidate>
+          <div className="flex flex-col items-center gap-2" style={{ textAlign: "center" }}>
+            <span className="authicon"><Mail size={24} /></span>
+            <h1 className="panel-title">Check your email</h1>
+            <p className="muted text-sm">
+              If <strong style={{ color: "var(--text)", overflowWrap: "anywhere" }}>{email.trim()}</strong> has an account, we sent it a code.
+              Enter it below, then you'll choose a new password. If you don't see the email, check your spam folder.
+            </p>
+          </div>
+          <CodeBoxes value={code} onChange={setCode} onComplete={(digits) => checkReset(null, digits)} disabled={busy} invalid={Boolean(error)} />
+          {error && <ErrorBox message={error} />}
+          {notice && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600, textAlign: "center" }}>{notice}</p>}
+          <button className="btn btn-primary" type="submit" disabled={busy || code.some((d) => !d)} style={{ padding: ".75rem 1rem" }}>
+            {busy ? "Checking…" : "Continue"}
+          </button>
+          <CodeLinks wait={wait} onResend={resendReset} backLabel="Back to sign in" onBack={() => switchTo("signin")} />
+        </form>
+      </AuthCard>
+    );
+  }
+
   if (mode === "verify") {
     return (
       <AuthCard>
@@ -120,12 +209,7 @@ export function AuthForm() {
           <button className="btn btn-primary" type="submit" disabled={busy || code.some((d) => !d)} style={{ padding: ".75rem 1rem" }}>
             {busy ? "Checking…" : "Confirm email"}
           </button>
-          <div className="flex justify-center gap-2 flex-wrap">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={resend} disabled={wait > 0}>
-              {wait > 0 ? `Send a new code in ${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}` : "Send a new code"}
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => switchTo("signup")}>Use a different email</button>
-          </div>
+          <CodeLinks wait={wait} onResend={resend} backLabel="Use a different email" onBack={() => switchTo("signup")} />
         </form>
       </AuthCard>
     );
@@ -168,6 +252,11 @@ export function AuthForm() {
               {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
             </button>
           </span>
+          {!creating && (
+            <span style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+              <button type="button" className="linkbtn text-sm" onClick={() => switchTo("forgot")}>Forgot password?</button>
+            </span>
+          )}
         </label>
         {error && <ErrorBox message={error} />}
         {notice && <p className="text-sm" style={{ color: "var(--ok)", fontWeight: 600 }}>{notice}</p>}
@@ -193,12 +282,31 @@ function AuthCard({ wide, children }) {
         .authicon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;
           background:var(--accent-soft);color:var(--accent)}
         .authsec{font-weight:700;font-size:.95rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+        .linkbtn{display:inline-flex;align-items:center;gap:.3rem;background:none;border:0;padding:0;color:var(--accent);
+          font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+        .linkbtn:hover{color:var(--accent-deep)}
         .otp{display:flex;justify-content:center;gap:.5rem}
         .otp input{flex:1;min-width:0;max-width:3.2rem;height:3.6rem;padding:0;text-align:center;font-size:1.6rem;font-weight:600;caret-color:var(--accent)}
         .otp input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
         .otp.bad input{border-color:var(--bad, #c62f3a)}
       `}</style>
       {children}
+    </div>
+  );
+}
+
+// Under a code: send another (after a countdown) and a way back, styled as links so they don't read as plain text
+function CodeLinks({ wait, onResend, backLabel, onBack }) {
+  const left = `${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, "0")}`;
+  return (
+    <div className="flex flex-col items-center gap-3 text-sm" style={{ borderTop: "1px solid var(--line)", paddingTop: 14, textAlign: "center" }}>
+      <p className="muted">
+        Didn't get the code?{" "}
+        {wait > 0
+          ? <>You can send a new one in <strong className="mono" style={{ color: "var(--text)" }}>{left}</strong>.</>
+          : <button type="button" className="linkbtn" onClick={onResend}>Send a new code</button>}
+      </p>
+      <button type="button" className="linkbtn" onClick={onBack}><ArrowLeft size={15} /> {backLabel}</button>
     </div>
   );
 }

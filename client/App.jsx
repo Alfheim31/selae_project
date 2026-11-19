@@ -4,6 +4,7 @@ import { CSS, go, Toaster, useHashRoute } from "./components/shared.jsx";
 import { Loading } from "./components/ui.jsx";
 import { useMe } from "./lib/account.js";
 import { hostKeys } from "./lib/api.js";
+import { passwordReset } from "./lib/auth.js";
 import { Discover } from "./pages/Discover.jsx";
 import { EventPage } from "./pages/EventPage.jsx";
 import { EventsHome } from "./pages/EventsHome.jsx";
@@ -42,8 +43,8 @@ export default function App() {
 
   let page;
   // A temporary password has to be replaced before anything else
-  if (me && me.mustChangePassword) {
-    page = <ChangePasswordPage me={me} onDone={reload} />;
+  if (me && (me.mustChangePassword || passwordReset.get())) {
+    page = <ChangePasswordPage me={me} onDone={reload} reset={!me.mustChangePassword} />;
   } else if (me && me.role === "student" && !(me.profile && me.profile.hasFace)) {
     // A student finishes their profile before anything else; once saved, the page they opened shows
     page = <><TopBar route="profile" /><ProfilePage required /></>;
