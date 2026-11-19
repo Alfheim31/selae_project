@@ -1,0 +1,11 @@
+torch>=2.2.0
+torchvision>=0.17.0
+onnx>=1.16.0
+pillow>=11.0.0
+pillow-heif>=0.18.0
+numpy>=1.24.0
+requests>=2.31.0
+tqdm>=4.66.0
+# Note: Install facenet-pytorch with `--no-deps` (see CUSTOM_FACE_RECOGNITION.md)
+# to avoid outdated Pillow/NumPy version conflicts on modern Python environments.
+facenet-pytorch==2.6.0

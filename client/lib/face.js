@@ -1,50 +1,80 @@
 import * as faceapi from "@vladmandic/face-api";
+import * as ort from "onnxruntime-web/wasm";
 
-let modelsLoaded = null;
+ort.env.wasm.numThreads = 1;
 
-export function ensureFaceModels() {
-	if (!modelsLoaded) {
-		modelsLoaded = Promise.all([
-			faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
-			faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-			faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-		]).catch((err) => {
-			modelsLoaded = null;
-			throw err;
-		});
-	}
-	return modelsLoaded;
-}
+let detectorLoaded = null;
+let ortSession = null;
 
 const detectorOptions = new faceapi.TinyFaceDetectorOptions({
-	inputSize: 320,
-	scoreThreshold: 0.5,
+  inputSize: 320,
+  scoreThreshold: 0.5,
 });
 
+export async function ensureFaceModels() {
+  if (!detectorLoaded) {
+    detectorLoaded = faceapi.nets.tinyFaceDetector.loadFromUri("/models").catch((err) => {
+      detectorLoaded = null;
+      throw err;
+    });
+  }
 
- // Extracts a 128-dimensional float array from a <video>, <img>, or <canvas> element.
- // Returns null if no face is clearly visible.
-export async function extractFaceDescriptor(mediaElement) {
-	await ensureFaceModels();
-	const detection = await faceapi
-		.detectSingleFace(mediaElement, detectorOptions)
-		.withFaceLandmarks()
-		.withFaceDescriptor();
+  if (!ortSession) {
+    ortSession = ort.InferenceSession.create("/models/selae_custom_face.onnx", {
+      executionProviders: ["wasm"],
+    }).catch((err) => {
+      ortSession = null;
+      throw err;
+    });
+  }
 
-	if (!detection) return null;
-	return {
-		descriptor: Array.from(detection.descriptor),
-		score: detection.detection.score,
-	};
+  await Promise.all([detectorLoaded, ortSession]);
+  return ortSession;
 }
 
-// Euclidean distance between two 128-D descriptors.
+function preprocessCrop(mediaElement, box) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 160;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(mediaElement, box.x, box.y, box.width, box.height, 0, 0, 160, 160);
+
+  const { data } = ctx.getImageData(0, 0, 160, 160);
+  const float32 = new Float32Array(3 * 160 * 160);
+  const stride = 160 * 160;
+
+  for (let i = 0; i < stride; i++) {
+    float32[i] = (data[i * 4] / 255 - 0.5) / 0.5;
+    float32[stride + i] = (data[i * 4 + 1] / 255 - 0.5) / 0.5;
+    float32[2 * stride + i] = (data[i * 4 + 2] / 255 - 0.5) / 0.5;
+  }
+
+  return new ort.Tensor("float32", float32, [1, 3, 160, 160]);
+}
+
+export async function extractFaceDescriptor(mediaElement) {
+  const session = await ensureFaceModels();
+  const detection = await faceapi.detectSingleFace(mediaElement, detectorOptions);
+
+  if (!detection) return null;
+
+  const inputTensor = preprocessCrop(mediaElement, detection.box);
+  const results = await session.run({ input: inputTensor });
+  const outputKey = session.outputNames?.[0] || "embedding";
+  const descriptor = Array.from(results[outputKey].data);
+
+  return {
+    descriptor,
+    score: detection.score,
+  };
+}
+
 export function euclideanDistance(a, b) {
-	if (!a || !b || a.length !== b.length) return Infinity;
-	let sum = 0;
-	for (let i = 0; i < a.length; i++) {
-		const diff = a[i] - b[i];
-		sum += diff * diff;
-	}
-	return Math.sqrt(sum);
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
 }
