@@ -5,6 +5,7 @@ import { newCode, newId, hashKey } from "./seed/seed.js";
 import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./intelligence/matcher.js";
 import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./intelligence/forecast.js";
 import { createAuth, supabaseVerifier, emailList } from "./auth.js";
+import { supabaseOrgAccounts } from "./orgAccounts.js";
 
 /* Logical layer */
 
@@ -70,14 +71,16 @@ function hostOrgs(data, user, superadmins) {
 }
 
 // superadmin (from .env), org (signed in with the org's official Gmail), or student
-// Password sign-ups don't prove the email is theirs yet, so those roles need a Google sign-in
+// A password sign-up alone doesn't prove the email, so the superadmin needs Google, and an org needs Google
+// or the account the server made for it (whose password was emailed to the org)
 function roleOf(data, user, superadmins) {
-  if (!user.viaGoogle) return { role: "student", org: null };
-  if (superadmins.includes(user.email)) return { role: "superadmin", org: null };
-  const org = (data.orgs || []).find((o) => o.email === user.email && !o.disabled);
-  if (org) return { role: "org", org: { id: org.id, name: org.name } };
+  if (user.viaGoogle && superadmins.includes(user.email)) return { role: "superadmin", org: null };
+  const org = (data.orgs || []).find((o) => o.email === user.email && !o.disabled && (user.viaGoogle || user.orgId === o.id));
+  if (org) return { role: "org", org: { id: org.id, name: org.name, type: org.type || null } };
   return { role: "student", org: null };
 }
+
+export const ORG_TYPES = { council: "Council", academic: "Academic org", nonacademic: "Non-academic org", religious: "Religious org" };
 function publicEvent(data, req, e) {
   const c = counts(data, e.id);
   const { hostKeyHash, ...rest } = e;
@@ -499,8 +502,9 @@ function historyKey(data, now) {
 }
 
 // venueLaptop: an offline venue laptop (SELAE_VENUE_LAPTOP=1) manages every event from localhost
+// orgAccounts: makes the org's sign-in account and emails its temporary password (see orgAccounts.js)
 export function createApi(store, { verify = supabaseVerifier(), superadmins = process.env.SELAE_SUPERADMINS,
-  venueLaptop = process.env.SELAE_VENUE_LAPTOP === "1" } = {}) {
+  venueLaptop = process.env.SELAE_VENUE_LAPTOP === "1", orgAccounts = supabaseOrgAccounts() } = {}) {
   const userFor = createAuth(verify);
   const admins = emailList(superadmins);
   let turnout = null, turnoutKey = "";
@@ -560,8 +564,19 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     const name = str(b.name, "Organization name", { max: 80 }).replace(/\s+/g, " ");
     const email = str(b.email, "Official email", { max: 120 }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "That email address doesn't look right.");
-    if (admins.includes(email)) fail(400, "That email belongs to a superadmin. Use the organization's own Gmail.");
-    return { name, email };
+    if (admins.includes(email)) fail(400, "That email belongs to a superadmin. Use the organization's own email.");
+    if (Object.values(store.data.profiles || {}).some((p) => p.email === email)) {
+      fail(409, "That email already has a student account. Use the organization's own email.");
+    }
+    if (b.type !== undefined && !ORG_TYPES[b.type]) fail(400, "Choose the kind of organization.");
+    return { name, email, ...(b.type !== undefined ? { type: b.type } : {}) };
+  };
+  // Where the emailed sign-in link points
+  const appUrl = (req) => process.env.SELAE_APP_URL || req.headers.origin || `http://${req.headers.host || "localhost:5173"}`;
+  // A fresh temporary password, emailed to the org (or shown once to the superadmin when email can't be sent)
+  const sendCredentials = async (req, org) => {
+    if (!orgAccounts) return { emailed: false, reason: "Sign-in isn't set up on this server (Supabase in .env)." };
+    return orgAccounts.provision({ email: org.email, orgId: org.id, orgName: org.name, appUrl: appUrl(req) });
   };
   const checkOrgUnique = ({ name, email }, exceptId = null) => {
     for (const o of store.data.orgs || []) {
@@ -584,10 +599,23 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const mine = role.role === "student"
         ? (store.data.orgMembers || []).filter((m) => m.email === req.user.email && orgById.has(m.orgId)) : [];
       const brief = (m) => ({ id: orgById.get(m.orgId).id, name: orgById.get(m.orgId).name });
-      return { user: { ...req.user, ...role, profile: profileView(profile),
+      return { user: { ...req.user, ...role, profile: profileView(profile), mustChangePassword: req.user.tempPassword,
         hostsFor: hostOrgs(store.data, req.user, admins).map((o) => ({ id: o.id, name: o.name })),
         officerOf: mine.filter((m) => m.status === "active").map(brief),
         invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m) })) } };
+    }],
+
+    // Sets the signed-in person's own password, which also ends a temporary one
+    ["POST", /^\/api\/me\/password$/, async (req) => {
+      const user = requireUser(req);
+      if (!orgAccounts) fail(503, "Sign-in isn't set up on this server.");
+      const { password } = await readBody(req);
+      if (typeof password !== "string" || password.length < 8) fail(400, "Use at least 8 characters.");
+      if (password.length > 72) fail(400, "Use 72 characters or fewer.");
+      if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) fail(400, "Use both letters and numbers.");
+      try { await orgAccounts.setPassword(user.id, password); } catch (e) { fail(400, e.message); }
+      userFor.forget(req);
+      return { ok: true };
     }],
 
     // The signed-in student's own details, filled in once and reused for every event
@@ -678,14 +706,15 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
 
     ["POST", /^\/api\/admin\/orgs$/, async (req) => {
       const user = requireSuperadmin(req);
-      const fields = orgFields(await readBody(req));
+      const b = await readBody(req);
+      if (b.type === undefined) fail(400, "Choose the kind of organization.");
+      const fields = orgFields(b);
       checkOrgUnique(fields);
-      return store.mutate((d) => {
-        d.orgs = d.orgs || [];
-        const org = { id: newId(), ...fields, disabled: false, createdAt: new Date().toISOString(), createdBy: user.email };
-        d.orgs.push(org);
-        return { org };
-      });
+      const org = { id: newId(), ...fields, disabled: false, createdAt: new Date().toISOString(), createdBy: user.email };
+      let credentials;
+      try { credentials = await sendCredentials(req, org); } catch (e) { fail(502, e.message); }
+      store.mutate((d) => { d.orgs = d.orgs || []; d.orgs.push(org); });
+      return { org, credentials };
     }],
 
     // Rename, change the official Gmail (new officers), or disable and enable
@@ -693,13 +722,27 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       requireSuperadmin(req);
       const org = (store.data.orgs || []).find((o) => o.id === id) || fail(404, "Organization not found.");
       const b = await readBody(req);
-      const fields = orgFields({ name: org.name, email: org.email, ...b });
+      const sameEmail = !b.email || String(b.email).trim().toLowerCase() === org.email;
+      const fields = sameEmail ? { ...orgFields({ name: org.name, ...b, email: "x@x.x" }), email: org.email } : orgFields({ name: org.name, ...b });
       checkOrgUnique(fields, id);
-      return store.mutate(() => {
+      let credentials = null;
+      if (!sameEmail) {
+        const before = org.email;
+        try { credentials = await sendCredentials(req, { ...org, ...fields }); } catch (e) { fail(502, e.message); }
+        if (orgAccounts) orgAccounts.release({ email: before, orgId: org.id }).catch((e) => console.error("SELAE: couldn't release the old org account.", e.message));
+      }
+      store.mutate(() => {
         Object.assign(org, fields, { updatedAt: new Date().toISOString() });
         if (typeof b.disabled === "boolean") org.disabled = b.disabled;
-        return { org };
       });
+      return { org, credentials };
+    }],
+
+    // A new temporary password for an org that lost theirs
+    ["POST", /^\/api\/admin\/orgs\/([\w-]+)\/password$/, async (req, [id]) => {
+      requireSuperadmin(req);
+      const org = (store.data.orgs || []).find((o) => o.id === id) || fail(404, "Organization not found.");
+      try { return { credentials: await sendCredentials(req, org) }; } catch (e) { fail(502, e.message); }
     }],
 
     ["GET", /^\/api\/events$/, (req) => {
@@ -795,6 +838,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const user = requireUser(req);
       if (roleOf(store.data, user, admins).role !== "student") fail(403, "Sign in with a student account to register.");
       const profile = (store.data.profiles || {})[user.id] || fail(409, "Set up your student profile first.");
+      if (!Array.isArray(profile.faceDescriptor)) fail(409, "Scan your face in your profile first.");
       const { id: _pid, userId: _uid, email: _email, studentId, faceDescriptor, updatedAt: _at, ...name } = profile;
       const student = { id: studentId, ...name };
 
@@ -966,7 +1010,8 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     };
     try {
       req.isLaptop = venueLaptop && isLocal(req);
-      req.user = await userFor(req);
+      const user = await userFor(req);
+      req.user = user && user.tempPassword && !/^\/api\/me(\/password)?$/.test(url.pathname) ? null : user;
       req.orgIds = new Set(hostOrgs(store.data, req.user, admins).map((o) => o.id));
       for (const [method, re, fn] of routes) {
         const m = url.pathname.match(re);

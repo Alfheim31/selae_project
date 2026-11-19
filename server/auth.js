@@ -11,8 +11,10 @@ function signInMethods(token) {
   } catch { return []; }
 }
 
-// Asks Supabase whose token this is. Returns { id, email, name, avatar, viaGoogle } or null.
+// Asks Supabase whose token this is. Returns { id, email, name, avatar, viaGoogle, orgId, tempPassword } or null.
 // viaGoogle: this session proved the email through Google, so it may carry the superadmin or org role.
+// orgId: the server made this account for an organization (app_metadata, which only the server can set).
+// tempPassword: it still has the temporary password that was emailed to it.
 export function supabaseVerifier({ url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_KEY } = {}) {
   if (!url || !key) return null;
   return async (token) => {
@@ -21,8 +23,9 @@ export function supabaseVerifier({ url = process.env.SUPABASE_URL, key = process
     const u = await res.json();
     if (!u || !u.id || !u.email) return null;
     const meta = u.user_metadata || {};
+    const app = u.app_metadata || {};
     return { id: u.id, email: u.email.toLowerCase(), name: meta.full_name || meta.name || "", avatar: meta.avatar_url || null,
-      viaGoogle: signInMethods(token).includes("oauth") };
+      viaGoogle: signInMethods(token).includes("oauth"), orgId: app.selae_org || null, tempPassword: Boolean(app.selae_temp_password) };
   };
 }
 
@@ -31,7 +34,11 @@ export const emailList = (raw) => String(raw || "").split(",").map((s) => s.trim
 // verify(token) -> user or null. Results are cached briefly so each request doesn't call Supabase.
 export function createAuth(verify) {
   const cache = new Map();
-  return async function userFor(req) {
+  const tokenOf = (req) => (String(req.headers.authorization || "").match(/^Bearer\s+(\S+)$/i) || [])[1];
+  // After the account changes (a new password), the next request asks Supabase again
+  userFor.forget = (req) => { cache.delete(tokenOf(req)); };
+  return userFor;
+  async function userFor(req) {
     if (!verify) return null;
     const m = String(req.headers.authorization || "").match(/^Bearer\s+(\S+)$/i);
     if (!m) return null;
@@ -43,5 +50,5 @@ export function createAuth(verify) {
     if (cache.size > CACHE_MAX) cache.clear();
     cache.set(token, { user, at: Date.now() });
     return user;
-  };
+  }
 }

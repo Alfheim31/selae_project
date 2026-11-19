@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { TopBar } from "./components/TopBar.jsx";
 import { CSS, go, useHashRoute } from "./components/shared.jsx";
 import { Loading } from "./components/ui.jsx";
+import { useMe } from "./lib/account.js";
 import { hostKeys } from "./lib/api.js";
 import { Discover } from "./pages/Discover.jsx";
 import { EventPage } from "./pages/EventPage.jsx";
@@ -16,6 +17,7 @@ const Manage = named(() => import("./pages/manage/Manage.jsx"), "Manage");
 const ProfilePage = named(() => import("./pages/account/ProfilePage.jsx"), "ProfilePage");
 const AdminPage = named(() => import("./pages/AdminPage.jsx"), "AdminPage");
 const CreateEvent = named(() => import("./pages/CreateEvent.jsx"), "CreateEvent");
+const ChangePasswordPage = named(() => import("./pages/account/ChangePassword.jsx"), "ChangePasswordPage");
 
 const TABS = ["dashboard", "analytics", "photos", "tickets", "settings"];
 
@@ -23,6 +25,7 @@ const LEGACY = { dashboard: "dashboard", scanner: "scan", analytics: "analytics"
 
 export default function App() {
   const route = useHashRoute();
+  const { me, reload } = useMe();
   const parts = route.split("/").filter(Boolean);
 
   // Legacy links
@@ -31,8 +34,20 @@ export default function App() {
     if (parts[0] === "host" && parts[1] && parts[2]) { hostKeys.add(parts[1], parts[2]); go(`m/${parts[1]}`); }
   }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Signed out: only Discover; the Events page is for signed-in accounts
+  useEffect(() => {
+    if (me === null && (parts[0] === "events" || parts[0] === "tickets")) go("");
+  }, [me, route]); // eslint-disable-line react-hooks/exhaustive-deps
+
   let page;
-  if (parts[0] === "m" && parts[1]) {
+  // A temporary password has to be replaced before anything else
+  if (me && me.mustChangePassword) {
+    page = <ChangePasswordPage me={me} onDone={reload} />;
+  } else if (me && me.role === "student" && !(me.profile && me.profile.hasFace)) {
+    // A student finishes their profile before anything else; once saved, the page they opened shows
+    page = <><TopBar route="profile" /><ProfilePage required /></>;
+  } else if (parts[0] === "m" && parts[1]) {
+
     const scan = parts[2] === "scan" || parts[2] === "scanner";
     page = <Manage id={parts[1]} tab={scan ? "dashboard" : TABS.includes(parts[2]) ? parts[2] : "dashboard"} scan={scan} />;
   } else {

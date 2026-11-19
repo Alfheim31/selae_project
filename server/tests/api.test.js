@@ -18,6 +18,11 @@ const USERS = ["boss@gmail.com", "org@gmail.com", "ana@gmail.com", "ben@gmail.co
 const fakeVerify = async (token) => {
   // "s:<anything>" is a student who signed up with a password
   if (token.startsWith("s:")) return { id: token, email: `${token.slice(2)}@school.test`, name: "", avatar: null, viaGoogle: false };
+  // "acct:<email>:<orgId>[:temp]" is the account the server made for an org, signed in with its password
+  if (token.startsWith("acct:")) {
+    const [, email, orgId, temp] = token.split(":");
+    return { id: `acct-${email}`, email, name: "", avatar: null, viaGoogle: false, orgId, tempPassword: temp === "temp" };
+  }
   const viaGoogle = !token.startsWith("pw:");
   const email = token.replace(/^pw:/, "");
   return USERS.includes(email) ? { id: email, email, name: "", avatar: null, viaGoogle } : null;
@@ -28,7 +33,14 @@ function setup(t, { venueLaptop = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "selae-api-"));
   const store = openStore(path.join(dir, "data.json"));
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  const handle = createApi(store, { verify: fakeVerify, superadmins: "Boss@gmail.com", venueLaptop });
+  // Org accounts: remembers what would be created and emailed
+  const sent = [];
+  const orgAccounts = {
+    async provision(x) { sent.push({ kind: "provision", ...x }); return x.email.includes("nomail") ? { emailed: false, password: "Temp1234abcd", reason: "no SMTP" } : { emailed: true }; },
+    async release(x) { sent.push({ kind: "release", ...x }); },
+    async setPassword(userId, password) { sent.push({ kind: "password", userId, password }); },
+  };
+  const handle = createApi(store, { verify: fakeVerify, superadmins: "Boss@gmail.com", venueLaptop, orgAccounts });
   // Events in the tests belong to this org, whose account is host@gmail.com
   store.mutate((d) => { d.orgs = [{ id: "test-org", name: "Test Org", email: "host@gmail.com" }]; });
   const call = async (method, url, body, { from = PHONE, headers = {} } = {}) => {
@@ -49,11 +61,11 @@ function setup(t, { venueLaptop = true } = {}) {
     store.mutate((d) => {
       d.profiles = d.profiles || {};
       d.profiles[uid] = { id: uid, userId: uid, email: `${uid.slice(2)}@school.test`, studentId, first: "Ana", last: "Reyes",
-        middle: "", suffix: "", section: "A", faceDescriptor: null, ...over };
+        middle: "", suffix: "", section: "A", faceDescriptor: Array(128).fill(0), ...over };
     });
     return call("POST", `/api/events/${id}/register`, {}, { ...opts, headers: { ...opts.headers, authorization: `Bearer ${uid}` } });
   };
-  return { store, call, event, register };
+  return { store, call, event, register, sent };
 }
 
 const regOf = (store, id, studentId) => store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId);
@@ -304,7 +316,7 @@ test("/api/me says who is signed in and their role", async (t) => {
   assert.equal(await me(null), null);
   assert.equal(await me("stranger@gmail.com"), null);
   assert.equal((await me("boss@gmail.com")).role, "superadmin");
-  assert.deepEqual((await me("org@gmail.com")).org, { id: "o1", name: "CS Society" });
+  assert.deepEqual((await me("org@gmail.com")).org, { id: "o1", name: "CS Society", type: null });
   assert.equal((await me("ana@gmail.com")).role, "student");
 
   // A password sign-up with someone else's email gets no admin or org powers
@@ -350,20 +362,20 @@ test("only the superadmin adds, edits, and disables organizations", async (t) =>
   const me = async (token) => (await call("GET", "/api/me", null, as(token))).json.user;
 
   // Students, and the superadmin's email through a password sign-in, can't
-  assert.equal((await call("POST", "/api/admin/orgs", { name: "X", email: "x@gmail.com" }, as("ana@gmail.com"))).status, 403);
-  assert.equal((await call("POST", "/api/admin/orgs", { name: "X", email: "x@gmail.com" }, as("pw:boss@gmail.com"))).status, 403);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "X", email: "x@gmail.com", type: "academic" }, as("ana@gmail.com"))).status, 403);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "X", email: "x@gmail.com", type: "academic" }, as("pw:boss@gmail.com"))).status, 403);
   assert.equal((await call("GET", "/api/admin/orgs")).status, 401);
 
-  const made = await call("POST", "/api/admin/orgs", { name: "CS  Society", email: "Org@Gmail.com" }, as("boss@gmail.com"));
+  const made = await call("POST", "/api/admin/orgs", { name: "CS  Society", email: "Org@Gmail.com", type: "academic" }, as("boss@gmail.com"));
   assert.equal(made.status, 200);
   assert.equal(made.json.org.name, "CS Society");
   assert.equal(made.json.org.email, "org@gmail.com");
   assert.equal((await me("org@gmail.com")).role, "org");
 
   // No duplicates, and the superadmin's own email can't be an org
-  assert.equal((await call("POST", "/api/admin/orgs", { name: "Other", email: "org@gmail.com" }, as("boss@gmail.com"))).status, 409);
-  assert.equal((await call("POST", "/api/admin/orgs", { name: "cs society", email: "y@gmail.com" }, as("boss@gmail.com"))).status, 409);
-  assert.equal((await call("POST", "/api/admin/orgs", { name: "Boss Org", email: "boss@gmail.com" }, as("boss@gmail.com"))).status, 400);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "Other", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"))).status, 409);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "cs society", email: "y@gmail.com", type: "academic" }, as("boss@gmail.com"))).status, 409);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "Boss Org", email: "boss@gmail.com", type: "academic" }, as("boss@gmail.com"))).status, 400);
 
   const id = made.json.org.id;
   const off = await call("PATCH", `/api/admin/orgs/${id}`, { disabled: true }, as("boss@gmail.com"));
@@ -381,7 +393,7 @@ test("an org invites a student as officer, the student accepts, and the org can 
   const { call } = setup(t);
   const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
   const me = async (token) => (await call("GET", "/api/me", null, as(token))).json.user;
-  await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com" }, as("boss@gmail.com"));
+  await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"));
 
   // Students can't manage officers, and orgs can't invite admin or org accounts
   assert.equal((await call("POST", "/api/org/members", { email: "ben@gmail.com" }, as("ana@gmail.com"))).status, 403);
@@ -520,4 +532,62 @@ test("localhost is no one special unless venue mode is on", async (t) => {
   assert.equal((await call("GET", `/api/events/${id}/manage`, null, as("host@gmail.com"))).status, 200);
   assert.equal((await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP, headers: { "x-selae-host-key": hostKey } })).status, 200);
   assert.equal((await call("POST", "/api/matcher/reset", null, as("boss@gmail.com"))).status, 200);
+});
+
+test("a new org gets an emailed temporary password, and must choose its own before doing anything", async (t) => {
+  const { call, sent, event } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const admin = as("boss@gmail.com");
+
+  // The kind is required and checked
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "Choir", email: "choir@gmail.com" }, admin)).status, 400);
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "Choir", email: "choir@gmail.com", type: "band" }, admin)).status, 400);
+
+  const made = await call("POST", "/api/admin/orgs", { name: "Choir", email: "Choir@gmail.com", type: "religious" }, admin);
+  assert.equal(made.status, 200);
+  assert.equal(made.json.org.type, "religious");
+  assert.deepEqual(made.json.credentials, { emailed: true });
+  const p = sent.find((x) => x.kind === "provision");
+  assert.equal(p.email, "choir@gmail.com");
+  assert.equal(p.orgId, made.json.org.id);
+
+  // Signed in with the temporary password: the org only sees itself until it changes it
+  const id = made.json.org.id;
+  const temp = as(`acct:choir@gmail.com:${id}:temp`);
+  const me = (await call("GET", "/api/me", null, temp)).json.user;
+  assert.equal(me.role, "org");
+  assert.equal(me.mustChangePassword, true);
+  assert.equal((await call("GET", "/api/org/members", null, temp)).status, 401);
+  assert.equal((await call("POST", "/api/me/password", { password: "short1" }, temp)).status, 400);
+  assert.equal((await call("POST", "/api/me/password", { password: "onlyletters" }, temp)).status, 400);
+  assert.equal((await call("POST", "/api/me/password", { password: "NewPass2026" }, temp)).status, 200);
+  assert.deepEqual(sent.at(-1), { kind: "password", userId: "acct-choir@gmail.com", password: "NewPass2026" });
+
+  // With its own password it's a full org account; a password account for another org's email isn't
+  const ok = as(`acct:choir@gmail.com:${id}`);
+  assert.equal((await call("GET", "/api/org/members", null, ok)).status, 200);
+  assert.equal((await call("GET", "/api/me", null, as("acct:choir@gmail.com:other-org"))).json.user.role, "student");
+
+  // Without email set up, the superadmin sees the password once to pass on
+  const manual = await call("POST", "/api/admin/orgs", { name: "Nomail Club", email: "nomail@gmail.com", type: "nonacademic" }, admin);
+  assert.equal(manual.json.credentials.emailed, false);
+  assert.equal(manual.json.credentials.password, "Temp1234abcd");
+
+  // A new email gets a new account, and the old one lets go of the org
+  const moved = await call("PATCH", `/api/admin/orgs/${id}`, { email: "choir2@gmail.com" }, admin);
+  assert.deepEqual(moved.json.credentials, { emailed: true });
+  assert.ok(sent.some((x) => x.kind === "release" && x.email === "choir@gmail.com" && x.orgId === id));
+  // A rename alone sends nothing
+  const before = sent.length;
+  assert.equal((await call("PATCH", `/api/admin/orgs/${id}`, { name: "Campus Choir", type: "council" }, admin)).json.org.type, "council");
+  assert.equal(sent.length, before);
+  // A fresh password on request
+  assert.deepEqual((await call("POST", `/api/admin/orgs/${id}/password`, null, admin)).json.credentials, { emailed: true });
+  assert.equal((await call("POST", `/api/admin/orgs/${id}/password`, null, as("ana@gmail.com"))).status, 403);
+
+  // A student's email can't become an org
+  const { id: ev } = await event();
+  await call("PUT", "/api/me/profile", { studentId: "2024-55555", first: "Ana", last: "Reyes", section: "A" }, as("ana@gmail.com"));
+  assert.equal((await call("POST", "/api/admin/orgs", { name: "Ana Org", email: "ana@gmail.com", type: "academic" }, admin)).status, 409);
+  assert.ok(ev);
 });

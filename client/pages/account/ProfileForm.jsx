@@ -6,11 +6,11 @@ import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
 
-export function ProfileForm({ me, onSaved }) {
+export function ProfileForm({ me, onSaved, required = false }) {
   const p = me.profile;
   const [f, setF] = useState(() => {
     if (p) return { first: p.first, middle: p.middle, last: p.last, suffix: p.suffix, studentId: p.studentId, section: p.section };
-    return pendingStudent.get(me.email) || EMPTY_STUDENT;
+    return pendingStudent.get(me.email) || { ...EMPTY_STUDENT, ...nameFromGoogle(me.name) };
   });
   const fromSignUp = !p && Boolean(pendingStudent.get(me.email));
   const [faceDescriptor, setFaceDescriptor] = useState(null);
@@ -45,7 +45,9 @@ export function ProfileForm({ me, onSaved }) {
         <p className="muted text-sm">{fromSignUp
           ? "Your email is confirmed. Check your details, scan your face, and save."
           : "Fill this in once. SELAE uses it every time you register for an event."}</p>
+        {required && <p className="text-sm" style={{ color: "var(--accent)", fontWeight: 600, marginTop: 6 }}>Finish your profile to continue using SELAE.</p>}
       </div>
+
       <StudentFields f={f} set={set} />
 
       <FaceCapture value={faceDescriptor} onChange={(d) => { setDone(false); setFaceDescriptor(d); }} onError={setError} saved={Boolean(p && p.hasFace)} />
@@ -58,4 +60,14 @@ export function ProfileForm({ me, onSaved }) {
       </button>
     </form>
   );
+}
+
+// "Juan Miguel Dela Cruz" -> first "Juan Miguel", last "Dela Cruz"; the student fixes it if it's wrong
+const PARTICLES = new Set(["de", "del", "dela", "delos", "la", "los", "san", "sta", "sta.", "santa", "van", "von"]);
+function nameFromGoogle(full) {
+  const words = String(full || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return { first: words[0] || "" };
+  let i = words.length - 1;
+  while (i > 1 && PARTICLES.has(words[i - 1].toLowerCase())) i--;
+  return { first: words.slice(0, i).join(" "), last: words.slice(i).join(" ") };
 }

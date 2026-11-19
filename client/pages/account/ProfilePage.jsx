@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { LayoutGrid, LogOut, ShieldCheck } from "lucide-react";
 import { Avatar } from "../../components/AccountMenu.jsx";
 import { fmtDate, go, Trails } from "../../components/shared.jsx";
 import { displayName, returnTo, ROLE_LABEL, useMe } from "../../lib/account.js";
@@ -11,7 +11,7 @@ import { ProfileForm } from "./ProfileForm.jsx";
 import { ProfileSkeleton } from "../../components/ui.jsx";
 
 /* ---------------- profile: filled in once, used for every event ---------------- */
-export function ProfilePage() {
+export function ProfilePage({ required = false }) {
   const { me, reload, session } = useMe();
   const signOutHere = async () => { await signOut(); go(""); };
 
@@ -22,6 +22,40 @@ export function ProfilePage() {
   const back = returnTo.get();
   const ready = me.role !== "student" || (me.profile && me.profile.hasFace);
   const name = displayName(me, session);
+  const joined = session && session.user.created_at ? fmtDate(session.user.created_at, { month: "long", year: "numeric" }) : null;
+
+  // Superadmin: a wide cover with the account in the middle, and the admin console under it
+  if (me.role === "superadmin") {
+    return (
+      <div className="wrap py-6 flex flex-col gap-6" style={{ maxWidth: 1100 }}>
+        <section className="panel" style={{ overflow: "hidden", padding: 0 }}>
+          <div className="sky" style={{ height: "clamp(150px, 24vw, 250px)" }}>
+            <Trails seed={me.email} opacity={0.6} />
+          </div>
+          <div className="flex flex-col items-center gap-2" style={{ textAlign: "center", padding: "0 1.5rem 1.4rem", marginTop: "clamp(-84px, -9vw, -60px)" }}>
+            <span style={{ borderRadius: "50%", border: "5px solid var(--surface)", boxShadow: "0 10px 28px -10px rgba(20,27,58,.45)", lineHeight: 0, position: "relative" }}>
+              <Avatar meta={meta} name={name.first} size={152} />
+            </span>
+            <h1 className="display" style={{ fontSize: "clamp(2rem, 4.2vw, 2.9rem)", marginTop: 6 }}>{name.full}</h1>
+            <div className="muted" style={{ overflowWrap: "anywhere" }}>{me.email}</div>
+            <div className="flex flex-wrap justify-center items-center gap-2 mt-1">
+              <span className="pill host"><ShieldCheck size={12} /> Superadmin</span>
+              <span className="tag">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
+              {joined && <><span className="faint">·</span><span className="tag">Joined {joined}</span></>}
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 flex-wrap" style={{ borderTop: "1px solid var(--line)", padding: ".6rem 1.2rem" }}>
+            <nav className="flex gap-1" aria-label="Profile sections">
+              <span className="toplink" aria-current="page" style={{ cursor: "default" }}><LayoutGrid size={16} /> Admin console</span>
+            </nav>
+            <button className="btn btn-sm" onClick={signOutHere}><LogOut size={15} /> Sign out</button>
+          </div>
+        </section>
+        <OrgsPanel />
+      </div>
+    );
+  }
+
   return (
     <div className="wrap py-10 flex flex-col gap-4" style={{ maxWidth: 1180 }}>
       {back && ready && (
@@ -68,7 +102,7 @@ export function ProfilePage() {
           {me.role === "student" && <InvitesPanel me={me} onChange={reload} />}
         </aside>
         <div className="min-w-0">
-          {me.role === "student" ? <ProfileForm me={me} onSaved={reload} />
+          {me.role === "student" ? <ProfileForm me={me} onSaved={reload} required={required}/>
             : me.role === "org" ? <OfficersPanel />
             : <OrgsPanel />}
         </div>

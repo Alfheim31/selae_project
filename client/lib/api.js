@@ -90,6 +90,8 @@ export const api = {
   adminOrgs: () => request("GET", "/api/admin/orgs"),
   createOrg: (body) => request("POST", "/api/admin/orgs", body),
   updateOrg: (id, body) => request("PATCH", `/api/admin/orgs/${id}`, body),
+  resendOrgPassword: (id) => request("POST", `/api/admin/orgs/${id}/password`),
+  changePassword: (password) => request("POST", "/api/me/password", { password }),
   events: () => request("GET", "/api/events"),
   event: (id) => request("GET", `/api/events/${id}`),
   async create(fields) {
