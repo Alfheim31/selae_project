@@ -265,8 +265,9 @@ function euclideanDistance(a, b) {
   return Math.sqrt(sum);
 }
 
-const FACE_AUTO_THRESHOLD = 0.48;
-const FACE_CONFIRM_THRESHOLD = 0.58;
+// Calibrated for selae_custom_face.onnx with face-test.html: same person up to 0.551, different people from 1.210
+const FACE_AUTO_THRESHOLD = 0.70;
+const FACE_CONFIRM_THRESHOLD = 0.90;
 
 function matchFace(data, event, body) {
   const desc = body.descriptor;
