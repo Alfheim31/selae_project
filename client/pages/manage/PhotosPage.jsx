@@ -3,6 +3,7 @@ import { Clock, ImagePlus, Images, Trash2 } from "lucide-react";
 import { Lightbox } from "../../components/Lightbox.jsx";
 import { fmtDate, fmtTime, go, prepareImage, skyOf } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
+import { askConfirm } from "../../components/ConfirmDialog.jsx";
 
 /* ---------------- photos ---------------- */
 export function PhotosPage({ data, now, refresh, onToast }) {
@@ -29,7 +30,8 @@ export function PhotosPage({ data, now, refresh, onToast }) {
     if (input.current) input.current.value = "";
   };
   const remove = async (p) => {
-    if (!window.confirm("Remove this photo from the event?")) return;
+    const ok = await askConfirm({ title: "Remove this photo?", message: "It disappears from the event page for everyone.", confirm: "Remove", danger: true });
+    if (!ok) return;
     try { await api.removePhoto(event.id, p.id); await refresh(); onToast("Photo removed"); } catch (e) { onToast(e.message); }
   };
 

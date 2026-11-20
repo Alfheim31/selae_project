@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { TopBar } from "./components/TopBar.jsx";
 import { CSS, go, Toaster, useHashRoute } from "./components/shared.jsx";
+import { ConfirmHost } from "./components/ConfirmDialog.jsx";
 import { Loading } from "./components/ui.jsx";
 import { useMe } from "./lib/account.js";
 import { hostKeys } from "./lib/api.js";
@@ -71,6 +72,7 @@ export default function App() {
       <style>{CSS}</style>
       <Suspense fallback={<Loading />}>{page}</Suspense>
       <Toaster />
+      <ConfirmHost />
     </div>
   );
 }

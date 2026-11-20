@@ -81,7 +81,7 @@ export function OrgProfile({ me, joined, onChange, onSignOut }) {
             <span className="pill host"><Building2 size={12} /> Organization account</span>
             {org.type && TYPE_LABEL[org.type] && <span className="tag">{TYPE_LABEL[org.type]}</span>}
             <span className="tag">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
-            {joined && <><span className="faint">·</span><span className="tag">Joined {joined}</span></>}
+            {joined && <span className="tag">Joined {joined}</span>}
           </div>
           {error && <div style={{ width: "100%", maxWidth: 520 }}><ErrorBox message={error} /></div>}
         </div>

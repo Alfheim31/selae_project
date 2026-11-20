@@ -5,6 +5,7 @@ import { Likely, TurnoutPanel, useForecast } from "../../components/forecast.jsx
 import { fmtDateShort, fmtTime, formatName, norm, OUTCOME_LABEL, pct } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
 import { ShareCard } from "./SettingsPage.jsx";
+import { askConfirm } from "../../components/ConfirmDialog.jsx";
 import { arrivalBuckets, chartTip, everyLabel, MethodChip, OutcomeIcon } from "./bits.jsx";
 
 export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
@@ -34,7 +35,8 @@ export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
 
   const promote = async (reg) => {
     const full = data.going.length >= data.capacity;
-    if (full && !window.confirm(`This event is full (${data.going.length} of ${data.capacity} going). Move ${formatName(student(reg.studentId))} to going anyway?`)) return;
+    if (full && !(await askConfirm({ title: "This event is full", confirm: "Move anyway",
+      message: `${data.going.length} of ${data.capacity} are going. Move ${formatName(student(reg.studentId))} to going anyway?` }))) return;
     try { await api.promote(event.id, reg.id, full); await refresh(); onToast(`${formatName(student(reg.studentId))} moved to going`); }
     catch (e) { onToast(e.message); }
   };

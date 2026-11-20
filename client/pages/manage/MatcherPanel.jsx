@@ -1,6 +1,7 @@
 import { Brain } from "lucide-react";
 import { fmtTime, pct } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
+import { askConfirm } from "../../components/ConfirmDialog.jsx";
 import { sure } from "./ScanResult.jsx";
 
 /* ---------------- intelligent matcher ---------------- */
@@ -12,7 +13,9 @@ const RESOLUTION_LABEL = { auto: "auto", confirmed: "operator picked", manual: "
 export function MatcherPanel({ m, onToast, refresh }) {
   const { scans } = m;
   const resetModel = async () => {
-    if (!window.confirm("Forget everything SELAE has learned about how this camera misreads digits?")) return;
+    const ok = await askConfirm({ title: "Reset the matcher?", confirm: "Reset", danger: true,
+      message: "SELAE forgets everything it has learned about how this camera misreads digits, and starts again from its built-in guesses." });
+    if (!ok) return;
     try { await api.resetMatcher(); onToast("Matcher reset to its starting beliefs"); refresh(); }
     catch (e) { onToast(e.message); }
   };

@@ -3,6 +3,7 @@ import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip, Cartes
 import { Brain, TrendingUp, TrendingDown, UserPlus } from "lucide-react";
 import { forecastNow } from "../../server/intelligence/forecast.js";
 import { api } from "../lib/api.js";
+import { askConfirm } from "./ConfirmDialog.jsx";
 import { pct, formatName } from "./shared.jsx";
 
 /* Turnout forecast and waitlist release */
@@ -50,7 +51,9 @@ function TurnoutPanelInner({ data, f, risk, setRisk, refresh, onToast }) {
     .sort((a, b) => a.p - b.p).slice(0, 5), [pending, f, data.forecast]);
 
   const doRelease = async () => {
-    if (!window.confirm(`Move the first ${release} people on the waitlist to going? Their tickets update right away.`)) return;
+    const ok = await askConfirm({ title: `Move ${release} people off the waitlist?`, confirm: "Move to going",
+      message: `The first ${release} people on the waitlist move to going. Their tickets update right away.` });
+    if (!ok) return;
     setBusy(true);
     try {
       const out = await api.release(data.event.id, risk);

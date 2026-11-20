@@ -42,7 +42,7 @@ export function ProfilePage({ required = false }) {
             <div className="flex flex-wrap justify-center items-center gap-2 mt-1">
               <span className="pill host"><ShieldCheck size={12} /> Superadmin</span>
               <span className="tag">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
-              {joined && <><span className="faint">·</span><span className="tag">Joined {joined}</span></>}
+              {joined && <span className="tag">Joined {joined}</span>}
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 flex-wrap" style={{ borderTop: "1px solid var(--line)", padding: ".6rem 1.2rem" }}>
