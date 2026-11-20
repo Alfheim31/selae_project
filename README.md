@@ -120,14 +120,19 @@ SELAE keeps its data in **Supabase** (Postgres plus Storage) when a `.env` file
 names a project, and otherwise in a local JSON file. To use Supabase:
 
 1. Create a project at supabase.com. In **SQL Editor**, paste `server/storage/supabase.sql`
-   and run it once. It creates six tables (`events`, `registrations`, `logs`,
-   `ocr_scans`, `directory`, `state`) and a public `uploads` bucket for photos.
+   and run it once. It creates the tables (`events`, `event_photos`, `registrations`, `logs`,
+   `ocr_scans`, `directory`, `profiles`, `orgs`, `org_members`, `notices`, `settings`) and a
+   public `uploads` bucket for photos. A project made before the columns runs
+   `server/storage/migrate-to-columns.sql` instead, starts the server once, then runs
+   `server/storage/finish-columns.sql`.
 2. Copy `.env.example` to `.env` and fill in the **Project URL** and the
    **service_role** key from Project Settings → API. The key stays on the server;
    phones never see it.
 3. Start the app. An empty project gets the demo data below on the first run.
 
-Each table row holds one record as JSON. The server keeps a working copy in memory
+Each table row holds one record, one column per field (see `server/storage/columns.js`;
+a ticket's check-in becomes `checkin_time`, `checkin_method`, ..., face signatures are number
+arrays). The server keeps a working copy in memory
 (the matcher and the forecast train on the whole history) and writes only the rows
 that changed, within 200 ms of each change and on shutdown. If Supabase can't be
 reached, the change stays pending and is retried every 5 seconds. Supabase needs
@@ -338,6 +343,7 @@ server/
     store.js           physical layer: picks Supabase or the JSON data file; atomic file writes
     supabase.js        Supabase store: one table per collection, photos in Storage, changed rows only
     supabase.sql       the tables and bucket to create once in the Supabase SQL editor
+    columns.js         which column of which table each field of a record goes to
   seed/
     seed.js            demo events, past history and student directory for the first run
     simulate.js        simulated event history, for the demo data and the evaluation

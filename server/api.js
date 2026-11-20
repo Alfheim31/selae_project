@@ -654,7 +654,8 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
         const before = d.profiles[user.id];
         const { id: studentId, ...name } = student;
         const now = new Date().toISOString();
-        d.profiles[user.id] = { id: user.id, userId: user.id, email: user.email, studentId, ...name,
+        // signInWith: how the account signed in when it saved the profile ("google" or "email"), for the records
+        d.profiles[user.id] = { id: user.id, userId: user.id, email: user.email, signInWith: user.viaGoogle ? "google" : "email", studentId, ...name,
           faceDescriptor: face || (before && before.faceDescriptor) || null,
           faceConsentAt: face ? now : (before && before.faceConsentAt) || null, updatedAt: now };
         if (face) {
@@ -879,7 +880,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       if (roleOf(store.data, user, admins).role !== "student") fail(403, "Sign in with a student account to register.");
       const profile = (store.data.profiles || {})[user.id] || fail(409, "Set up your student profile first.");
       if (!Array.isArray(profile.faceDescriptor)) fail(409, "Scan your face in your profile first.");
-      const { id: _pid, userId: _uid, email: _email, studentId, faceDescriptor, faceConsentAt: _consent, updatedAt: _at, ...name } = profile;
+      const { id: _pid, userId: _uid, email: _email, signInWith: _via, studentId, faceDescriptor, faceConsentAt: _consent, updatedAt: _at, ...name } = profile;
       const student = { id: studentId, ...name };
 
       const existing = store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId && r.status !== "cancelled");

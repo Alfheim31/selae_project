@@ -1,8 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { buildSeed } from "../seed/seed.js";
 import { trackStore, untrackStore } from "./store.js";
+import { assemble, rowsFor, TABLES, toRow } from "./columns.js";
 
-/* Supabase store: same interface as the file store, rows in Postgres, photos in Storage */
+/* Supabase store: same interface as the file store, one column per field in Postgres, photos in Storage.
+   The server keeps everything in memory and writes back only the rows that changed. */
 
 const SAVE_DELAY = 200;
 const RETRY_DELAY = 5000;
@@ -11,18 +13,8 @@ const PAGE = 1000;
 const UPSERT_CHUNK = 500;
 const DELETE_CHUNK = 200;
 const BUCKET = "uploads";
-
-// One table per collection; everything else at the top level (rev, matcher) goes in `state`
-const TABLES = [
-  { table: "events", key: "id", field: "events", kind: "array" },
-  { table: "registrations", key: "id", field: "registrations", kind: "array", eventId: true },
-  { table: "logs", key: "uid", field: "logs", kind: "array", eventId: true },
-  { table: "ocr_scans", key: "id", field: "ocrScans", kind: "array", eventId: true },
-  { table: "directory", key: "id", field: "directory", kind: "map" },
-  { table: "profiles", key: "id", field: "profiles", kind: "map" },
-  { table: "state", key: "key", field: null, kind: "state" },
-];
-const COLLECTIONS = new Set(TABLES.map((t) => t.field).filter(Boolean));
+// Before the columns, top-level values (rev, matcher, organizations, officers, notices) were kept here as JSON
+const LEGACY_STATE = "state";
 
 function missingTable(error) {
   const text = `${error.code || ""} ${error.message || ""}`;
@@ -31,84 +23,137 @@ function missingTable(error) {
 
 function explain(error, what) {
   if (missingTable(error)) {
-    return new Error(`SELAE can't find its tables in Supabase (${error.message}). Open the SQL editor of your project, paste server/storage/supabase.sql and run it, then start again.`);
+    return new Error(`SELAE can't find its tables in Supabase (${error.message}). Open the SQL editor of your project, run server/storage/supabase.sql `
+      + "(a new project) or server/storage/migrate-to-columns.sql (a project made before the columns), then start again.");
+  }
+  if (/column .* does not exist|Could not find the .* column/i.test(error.message || "")) {
+    return new Error(`SELAE's tables in Supabase don't have their columns yet (${error.message}). Run server/storage/migrate-to-columns.sql in the SQL editor, then start again.`);
   }
   return new Error(`SELAE couldn't ${what} in Supabase: ${error.message || error}`);
 }
 
-// Rows for one table, as key -> { row, json }; json is what we compare between flushes
-function rowsOf(spec, data) {
-  const out = new Map();
-  const now = new Date().toISOString();
-  const add = (key, value, eventId) => {
-    if (key === undefined || key === null || key === "") return;
-    const row = { [spec.key]: String(key), data: value, updated_at: now };
-    if (spec.eventId) row.event_id = eventId ?? null;
-    out.set(String(key), { row, json: JSON.stringify(value) });
-  };
-  if (spec.kind === "array") for (const item of data[spec.field] || []) add(item[spec.key], item, item.eventId);
-  else if (spec.kind === "map") for (const [k, v] of Object.entries(data[spec.field] || {})) add(k, v);
-  else for (const [k, v] of Object.entries(data)) if (!COLLECTIONS.has(k)) add(k, v);
-  return out;
-}
-
-async function readAll(client, spec) {
+// Every row of a table, oldest first; null when the table doesn't exist
+async function readAll(client, table) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await client.from(spec.table).select("*").order("seq", { ascending: true }).range(from, from + PAGE - 1);
-    if (error) throw explain(error, `read ${spec.table}`);
+    const { data, error } = await client.from(table).select("*").order("seq", { ascending: true }).range(from, from + PAGE - 1);
+    if (error) {
+      if (missingTable(error)) return null;
+      throw explain(error, `read ${table}`);
+    }
     rows.push(...(data || []));
     if (!data || data.length < PAGE) break;
   }
   return rows;
 }
 
-function assemble(byTable) {
-  const data = {};
-  for (const spec of TABLES) {
-    const rows = byTable.get(spec.table) || [];
-    if (spec.kind === "array") data[spec.field] = rows.map((r) => r.data);
-    else if (spec.kind === "map") data[spec.field] = Object.fromEntries(rows.map((r) => [r.id, r.data]));
-    else for (const r of rows) data[r.key] = r.data;
-  }
-  return data;
-}
-
 export async function openSupabaseStore({ url, key, client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) }) {
   // Load everything, or seed an empty project
   const byTable = new Map();
-  for (const spec of TABLES) byTable.set(spec.table, await readAll(client, spec));
-  const empty = [...byTable.values()].every((rows) => rows.length === 0);
-  const data = empty ? buildSeed(new Date()) : assemble(byTable);
-  if (!Array.isArray(data.events)) throw new Error("The Supabase tables don't hold SELAE data.");
+  for (const spec of TABLES) {
+    const rows = await readAll(client, spec.table);
+    if (rows === null) throw explain({ code: "42P01", message: `relation "public.${spec.table}" does not exist` }, `read ${spec.table}`);
+    byTable.set(spec.table, rows);
+  }
+  const stateRows = (await readAll(client, LEGACY_STATE)) || [];
+
+  /* Rows saved before the columns keep the whole record in a `data` JSON column. They're read from there,
+     written back as columns (with `data` cleared), and the old `state` rows are deleted once moved. */
+  const legacy = new Map(TABLES.map((t) => [t.table, new Set()]));
+  const fromDb = new Map(TABLES.map((t) => [t.table, new Set()]));
+  const spec = (name) => TABLES.find((t) => t.table === name);
+  const canonical = new Map(TABLES.map((t) => [t.table, []]));
+  for (const t of TABLES) {
+    if (t.kind === "child") continue;
+    for (const row of byTable.get(t.table)) {
+      const k = String(row[t.key]);
+      if (row.data !== null && row.data !== undefined && t.kind !== "settings") {
+        legacy.get(t.table).add(k);
+        canonical.get(t.table).push(toRow(t, row.data, { key: k }));
+        // Photos were part of the event
+        if (t.table === "events") {
+          (row.data.photos || []).forEach((p, i) => canonical.get("event_photos").push(toRow(spec("event_photos"), { ...p, _position: i }, { parentId: k })));
+        }
+      } else {
+        fromDb.get(t.table).add(k);
+        canonical.get(t.table).push(row);
+      }
+    }
+  }
+  for (const row of byTable.get("event_photos")) { fromDb.get("event_photos").add(String(row.id)); canonical.get("event_photos").push(row); }
+
+  // The old `state` rows: used for whatever the new tables don't have yet, then deleted
+  const movedState = [];
+  const state = Object.fromEntries(stateRows.map((r) => [r.key, r.data]));
+  if (stateRows.length) {
+    const settings = spec("settings");
+    if (!canonical.get("settings").length && ("rev" in state || "matcher" in state)) {
+      canonical.get("settings").push(toRow(settings, { id: "main", rev: state.rev, matcher: state.matcher }));
+    }
+    for (const [field, table] of [["orgs", "orgs"], ["orgMembers", "org_members"], ["notices", "notices"]]) {
+      if (canonical.get(table).length || !Array.isArray(state[field])) continue;
+      for (const rec of state[field]) canonical.get(table).push(toRow(spec(table), rec));
+    }
+    for (const k of Object.keys(state)) {
+      if (["rev", "matcher", "orgs", "orgMembers", "notices"].includes(k)) movedState.push(k);
+      else console.error(`SELAE: the old state table has "${k}", which has no column; it was left there.`);
+    }
+  }
+
+  const empty = TABLES.every((t) => canonical.get(t.table).length === 0);
+  const data = empty ? buildSeed(new Date()) : assemble(canonical);
+  if (!Array.isArray(data.events)) data.events = [];
+  for (const t of TABLES) if (t.kind === "array" && !Array.isArray(data[t.field])) data[t.field] = [];
+  for (const t of TABLES) if (t.kind === "map" && !data[t.field]) data[t.field] = {};
   data.rev = data.rev || 1;
 
+  // What each table holds now, as the server would write it; rows that came from `data` aren't in here,
+  // so they get written as columns on the first flush
   const previous = new Map();
-  if (!empty) for (const spec of TABLES) previous.set(spec.table, new Map([...rowsOf(spec, data)].map(([k, v]) => [k, v.json])));
+  for (const t of TABLES) {
+    const have = fromDb.get(t.table);
+    const m = new Map();
+    for (const [k, row] of rowsFor(t, data)) if (have.has(k)) m.set(k, JSON.stringify(row));
+    // In the table but not in the data (a photo of a deleted event): removed on the next flush
+    for (const k of have) if (!m.has(k)) m.set(k, "");
+    previous.set(t.table, m);
+  }
 
-  let timer = null, retry = null, dirty = empty, flushing = null;
+  let timer = null, retry = null, dirty = true, flushing = null;
 
   // Writes only the rows that changed since the last successful flush
   async function sync() {
-    const plan = TABLES.map((spec) => {
-      const current = rowsOf(spec, data);
-      const before = previous.get(spec.table) || new Map();
-      const upserts = [], deletes = [];
-      for (const [k, { row, json }] of current) if (before.get(k) !== json) upserts.push(row);
+    const now = new Date().toISOString();
+    const plan = TABLES.map((t) => {
+      const current = rowsFor(t, data);
+      const before = previous.get(t.table);
+      const old = legacy.get(t.table);
+      const upserts = [], deletes = [], json = new Map();
+      for (const [k, row] of current) {
+        const j = JSON.stringify(row);
+        json.set(k, j);
+        if (before.get(k) !== j) upserts.push({ ...row, ...(old.has(k) ? { data: null } : {}), updated_at: now });
+      }
       for (const k of before.keys()) if (!current.has(k)) deletes.push(k);
-      return { spec, current, upserts, deletes };
+      for (const k of old) if (!current.has(k)) deletes.push(k);
+      return { t, json, upserts, deletes };
     });
-    for (const { spec, upserts, deletes } of plan) {
+    for (const { t, upserts, deletes } of plan) {
       for (let i = 0; i < upserts.length; i += UPSERT_CHUNK) {
-        const { error } = await client.from(spec.table).upsert(upserts.slice(i, i + UPSERT_CHUNK), { onConflict: spec.key });
-        if (error) throw explain(error, `save ${spec.table}`);
+        const { error } = await client.from(t.table).upsert(upserts.slice(i, i + UPSERT_CHUNK), { onConflict: t.key });
+        if (error) throw explain(error, `save ${t.table}`);
       }
       for (let i = 0; i < deletes.length; i += DELETE_CHUNK) {
-        const { error } = await client.from(spec.table).delete().in(spec.key, deletes.slice(i, i + DELETE_CHUNK));
-        if (error) throw explain(error, `delete from ${spec.table}`);
+        const { error } = await client.from(t.table).delete().in(t.key, deletes.slice(i, i + DELETE_CHUNK));
+        if (error) throw explain(error, `delete from ${t.table}`);
       }
     }
-    for (const { spec, current } of plan) previous.set(spec.table, new Map([...current].map(([k, v]) => [k, v.json])));
+    for (const { t, json } of plan) { previous.set(t.table, json); legacy.get(t.table).clear(); }
+    if (movedState.length) {
+      const { error } = await client.from(LEGACY_STATE).delete().in("key", movedState);
+      if (error) throw explain(error, "clear the old state table");
+      movedState.length = 0;
+    }
   }
 
   async function flush() {
@@ -168,9 +213,9 @@ export async function openSupabaseStore({ url, key, client = createClient(url, k
     uploadUrl,
   };
   trackStore(store);
-  if (empty) {
-    await flush();
-    console.log("SELAE: the Supabase project was empty, so the demo data was written there.");
-  }
+  // Writes the demo data into an empty project, or moves records into a table created since the last
+  // start; when the tables already match what was read, nothing is written
+  await flush();
+  if (empty) console.log("SELAE: the Supabase project was empty, so the demo data was written there.");
   return store;
 }

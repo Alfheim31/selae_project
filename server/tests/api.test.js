@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { openStore } from "../storage/store.js";
+import { unmappedFields } from "../storage/columns.js";
 import { createApi } from "../api.js";
 
 /* Check-in rules, through the real routes */
@@ -32,7 +33,12 @@ const fakeVerify = async (token) => {
 function setup(t, { venueLaptop = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "selae-api-"));
   const store = openStore(path.join(dir, "data.json"));
-  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  t.after(() => {
+    // Whatever the test left in the data has to fit the Supabase columns, or it would be lost there
+    const problems = unmappedFields(store.data);
+    store.close(); fs.rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(problems, [], "data that wouldn't survive the Supabase columns");
+  });
   // Org accounts: remembers what would be created and emailed
   const sent = [];
   const orgAccounts = {
@@ -377,6 +383,7 @@ test("a student fills in their profile once, and the face stays on the server", 
   assert.equal(saved.json.profile.first, "Ana");
   assert.equal(saved.json.profile.section, "BSCS 3-4");
   assert.equal(saved.json.profile.hasFace, true);
+  assert.equal(saved.json.profile.signInWith, "google");
   assert.ok(!("faceDescriptor" in saved.json.profile));
 
   // Editing the name without a new scan keeps the face
