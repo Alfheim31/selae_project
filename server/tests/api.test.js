@@ -152,6 +152,29 @@ test("promoting past capacity needs confirmation", async (t) => {
   assert.equal(regOf(store, id, "2099-00002").status, "going");
 });
 
+test("an organization sets its own profile photo and cover", async (t) => {
+  const { store, call } = setup(t, { venueLaptop: false });
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  // A raw image upload, the way the browser sends one
+  const send = async (method, url, token, body) => {
+    const req = Readable.from(body ? [body] : []);
+    Object.assign(req, { method, url, headers: { authorization: `Bearer ${token}`, "content-type": "image/png" }, socket: { remoteAddress: PHONE } });
+    const res = { statusCode: 200, setHeader() {}, end(s) { this.body = s; } };
+    const handle = createApi(store, { verify: fakeVerify, superadmins: "Boss@gmail.com", venueLaptop: false, orgAccounts: null });
+    await handle(req, res, null);
+    return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null };
+  };
+  const logo = await send("POST", "/api/org/image/logo", "host@gmail.com", png);
+  assert.equal(logo.status, 200);
+  assert.ok(logo.json.org.logo);
+  assert.equal((await call("GET", "/api/me", null, { headers: { authorization: "Bearer host@gmail.com" } })).json.user.org.logo, logo.json.org.logo);
+  assert.ok((await send("POST", "/api/org/image/cover", "host@gmail.com", png)).json.org.cover);
+  // Only the organization's own account, and only images
+  assert.equal((await send("POST", "/api/org/image/logo", "ana@gmail.com", png)).status, 403);
+  assert.equal((await send("POST", "/api/org/image/logo", "host@gmail.com", Buffer.from("not an image"))).status, 400);
+  assert.equal((await send("DELETE", "/api/org/image/logo", "host@gmail.com")).json.org.logo, null);
+});
+
 test("each account sees only its own tickets", async (t) => {
   const { call, event, register } = setup(t);
   const { id } = await event();
@@ -327,7 +350,7 @@ test("/api/me says who is signed in and their role", async (t) => {
   assert.equal(await me(null), null);
   assert.equal(await me("stranger@gmail.com"), null);
   assert.equal((await me("boss@gmail.com")).role, "superadmin");
-  assert.deepEqual((await me("org@gmail.com")).org, { id: "o1", name: "CS Society", type: null });
+  assert.deepEqual((await me("org@gmail.com")).org, { id: "o1", name: "CS Society", type: null, logo: null, cover: null });
   assert.equal((await me("ana@gmail.com")).role, "student");
 
   // A password sign-up with someone else's email gets no admin or org powers

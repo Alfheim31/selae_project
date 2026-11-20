@@ -114,8 +114,11 @@ export const api = {
   promote: (id, regId, force) => request("POST", `/api/events/${id}/registrations/${regId}/promote`, { force: Boolean(force) }),
   release: (id, risk) => request("POST", `/api/events/${id}/release`, { risk }),
   uploadCover: (id, blob) => upload(`/api/events/${id}/cover`, blob),
+  // The organization's own profile photo ("logo") and cover
+  uploadOrgImage: (kind, blob) => upload(`/api/org/image/${kind}`, blob),
+  removeOrgImage: (kind) => request("DELETE", `/api/org/image/${kind}`),
   removeCover: (id) => request("DELETE", `/api/events/${id}/cover`),
   uploadPhoto: (id, blob) => upload(`/api/events/${id}/photos`, blob),
   removePhoto: (id, photoId) => request("DELETE", `/api/events/${id}/photos/${photoId}`),
-  notifications: () => request("POST", "/api/notifications", { follow: follows.all() }),
+  notifications: (uid) => request("POST", "/api/notifications", { follow: follows.all(uid) }),
 };

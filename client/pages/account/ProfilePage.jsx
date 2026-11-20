@@ -6,6 +6,7 @@ import { signOut } from "../../lib/auth.js";
 import { AuthForm } from "./AuthForm.jsx";
 import { InvitesPanel } from "./InvitesPanel.jsx";
 import { OfficersPanel } from "./OfficersPanel.jsx";
+import { OrgProfile } from "./OrgProfile.jsx";
 import { OrgsPanel } from "./OrgsPanel.jsx";
 import { ProfileForm } from "./ProfileForm.jsx";
 import { ProfileSkeleton } from "../../components/ui.jsx";
@@ -54,6 +55,11 @@ export function ProfilePage({ required = false }) {
         <OrgsPanel />
       </div>
     );
+  }
+
+  // Organization: the same wide layout, with a cover and photo the organization uploads, and its officers under it
+  if (me.role === "org" && me.org) {
+    return <OrgProfile me={me} joined={joined} onChange={reload} onSignOut={signOutHere} />;
   }
 
   return (

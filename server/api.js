@@ -79,7 +79,7 @@ function hostOrgs(data, user, superadmins) {
 function roleOf(data, user, superadmins) {
   if (user.viaGoogle && superadmins.includes(user.email)) return { role: "superadmin", org: null };
   const org = (data.orgs || []).find((o) => o.email === user.email && !o.disabled && (user.viaGoogle || user.orgId === o.id));
-  if (org) return { role: "org", org: { id: org.id, name: org.name, type: org.type || null } };
+  if (org) return { role: "org", org: { id: org.id, name: org.name, type: org.type || null, logo: org.logo || null, cover: org.cover || null } };
   return { role: "student", org: null };
 }
 
@@ -663,6 +663,23 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
         }
         return { profile: profileView(d.profiles[user.id]) };
       });
+    }],
+
+    /* ---------- org account: profile photo and cover ---------- */
+    ["POST", /^\/api\/org\/image\/(logo|cover)$/, async (req, [kind]) => {
+      const org = requireOrg(req);
+      const url = await saveUpload(`org-${org.id}-${kind}`, await readImage(req));
+      const old = org[kind];
+      store.mutate(() => { org[kind] = url; });
+      removeUpload(old);
+      return { org: { id: org.id, name: org.name, logo: org.logo || null, cover: org.cover || null } };
+    }],
+    ["DELETE", /^\/api\/org\/image\/(logo|cover)$/, (req, [kind]) => {
+      const org = requireOrg(req);
+      const old = org[kind];
+      store.mutate(() => { delete org[kind]; });
+      removeUpload(old);
+      return { org: { id: org.id, name: org.name, logo: org.logo || null, cover: org.cover || null } };
     }],
 
     /* ---------- org account: officers ---------- */
