@@ -10,10 +10,20 @@ const publish = (uid, me) => {
   current = { uid, me };
   for (const l of listeners) l(me);
 };
+// A server that is waking up (Render's free tier sleeps) can take a minute to answer. Until it does, the
+// account stays "loading" instead of looking signed out, which hid Events and showed the sign-in form.
 async function fetchMe(uid) {
-  let me = null;
-  try { me = (await api.me()).user; } catch { /* signed out or offline */ }
-  publish(uid, me);
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    try {
+      const me = (await api.me()).user;
+      publish(uid, me);
+      return;
+    } catch {
+      if (current.uid !== uid) return;
+      await new Promise((r) => setTimeout(r, Math.min(2000 * attempt, 8000)));
+    }
+  }
+  publish(uid, null);
 }
 
 // The signed-in account as SELAE sees it (role, profile). undefined while loading, null when signed out.

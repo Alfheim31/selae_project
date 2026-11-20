@@ -29,7 +29,8 @@ export function ChangePasswordPage({ me, onDone, reset = false }) {
       passwordReset.clear();
       await onDone();
       toast("Password changed.");
-      go("profile");
+      // Same landing as any sign-in: Discover (a student without a profile still sees the profile form first)
+      go("", { replace: true });
     } catch (err) { setError(err.message); setBusy(false); }
   };
   const leave = async () => { await signOut(); go(""); };

@@ -20,7 +20,8 @@ export function TopBar({ route }) {
           </button>
           <nav className="flex items-center gap-1" aria-label="Main">
             <button className="toplink" aria-current={at("discover")} onClick={() => go("")}><Compass size={17} className="hidden sm:block" /> <span>Discover</span></button>
-            {me && <button className="toplink" aria-current={at("events")} onClick={() => go("events")}><Ticket size={17} className="hidden sm:block" /> <span>Events</span></button>}
+            {/* Students and organizations have their own events; the superadmin only browses */}
+            {me && me.role !== "superadmin" && <button className="toplink" aria-current={at("events")} onClick={() => go("events")}><Ticket size={17} className="hidden sm:block" /> <span>Events</span></button>}
           </nav>
         </div>
         <div className="flex items-center gap-2">

@@ -36,9 +36,10 @@ export default function App() {
     if (parts[0] === "host" && parts[1] && parts[2]) { hostKeys.add(parts[1], parts[2]); go(`m/${parts[1]}`, { replace: true }); }
   }, [route]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Signed out: only Discover; the Events page is for signed-in accounts
+  // Signed out or the superadmin: only Discover; the Events page is for students and organizations
   useEffect(() => {
-    if (me === null && (parts[0] === "events" || parts[0] === "tickets")) go("", { replace: true });
+    const noEvents = me === null || (me && me.role === "superadmin");
+    if (noEvents && (parts[0] === "events" || parts[0] === "tickets")) go("", { replace: true });
   }, [me, route]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let page;

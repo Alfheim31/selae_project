@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Eye, EyeOff, KeyRound, Mail } from "lucide-react";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
-import { Mark } from "../../components/shared.jsx";
+import { go, Mark } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
-import { pendingStudent } from "../../lib/account.js";
+import { pendingStudent, returnTo } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
 import {
   passwordSignIn, passwordSignUp, resendEmailCode, sendPasswordResetCode, signIn, verifyEmailCode, verifyResetCode,
@@ -35,6 +35,14 @@ export function AuthForm() {
     setWait(m === "verify" || m === "reset" ? RESEND_WAIT : 0);
   };
 
+  // Signed in: back to the event they were registering for, or Discover. A student with an unfinished
+  // profile still sees the profile form first (App.jsx), then lands on that page once it's saved.
+  const afterSignIn = () => {
+    const back = returnTo.get();
+    returnTo.clear();
+    go(back || "", { replace: true });
+  };
+
   useEffect(() => {
     if (wait <= 0) return;
     const t = setTimeout(() => setWait((s) => s - 1), 1000);
@@ -64,7 +72,7 @@ export function AuthForm() {
         pendingStudent.set(email.trim(), f);
       }
       // On success the session changes and this page shows the profile
-      if (!creating) await passwordSignIn(email.trim(), password);
+      if (!creating) { await passwordSignIn(email.trim(), password); afterSignIn(); }
       else if (await passwordSignUp(email.trim(), password)) switchTo("verify");
     } catch (err) {
       if (err.unconfirmed) {
@@ -90,7 +98,7 @@ export function AuthForm() {
     checking.current = true;
     setBusy(true);
     // On success the session changes and this page shows the profile
-    try { await verifyEmailCode(email.trim(), value); }
+    try { await verifyEmailCode(email.trim(), value); afterSignIn(); }
     catch (err) { setError(err.message); setCode(EMPTY_CODE()); }
     checking.current = false;
     setBusy(false);
