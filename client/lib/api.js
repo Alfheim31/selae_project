@@ -84,6 +84,7 @@ export const api = {
   info: () => request("GET", "/api/info"),
   studentNumberFree: (studentId) => request("GET", `/api/student-numbers/${encodeURIComponent(studentId)}`),
   me: () => request("GET", "/api/me"),
+  myAttended: () => request("GET", "/api/me/attended"),
   saveProfile: (body) => request("PUT", "/api/me/profile", body),
   orgMembers: () => request("GET", "/api/org/members"),
   inviteOfficer: (email) => request("POST", "/api/org/members", { email }),

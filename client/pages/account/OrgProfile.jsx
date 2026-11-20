@@ -80,9 +80,9 @@ export function OrgProfile({ me, joined, onChange }) {
           <div className="muted" style={{ overflowWrap: "anywhere" }}>{me.email}</div>
           <div className="flex flex-wrap justify-center items-center gap-2 mt-1">
             <span className="pill host"><Building2 size={12} /> Organization account</span>
-            {org.type && TYPE_LABEL[org.type] && <span className="tag">{TYPE_LABEL[org.type]}</span>}
-            <span className="tag">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
-            {joined && <span className="tag">Joined {joined}</span>}
+            {org.type && TYPE_LABEL[org.type] && <span className="pill soft">{TYPE_LABEL[org.type]}</span>}
+            <span className="pill soft">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
+            {joined && <span className="pill soft">Joined {joined}</span>}
           </div>
           {error && <div style={{ width: "100%", maxWidth: 520 }}><ErrorBox message={error} /></div>}
         </div>
