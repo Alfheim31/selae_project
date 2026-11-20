@@ -49,6 +49,12 @@ export function Discover({ drawerId }) {
   }, [all]);
   const recentPhotos = all.filter((e) => e.isPast && (e.photos || []).length).sort((a, b) => b.endsAt.localeCompare(a.endsAt)).slice(0, 4);
   const open = (id) => go(`discover/${id}`);
+  // The host's events are listed further down, so take the page there
+  const showCalendar = (name) => {
+    const next = cal === name ? null : name;
+    setCal(next);
+    if (next) requestAnimationFrame(() => document.getElementById("res-h")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   const filtered = cat || cal || q.trim();
   const mine = upcoming.filter((e) => tickets.has(e.id) && tickets.get(e.id).status !== "cancelled");
 
@@ -131,7 +137,7 @@ export function Discover({ drawerId }) {
                     </div>
                     {c.next && <div className="text-sm muted truncate">Next: <strong style={{ color: "var(--text)" }}>{c.next.title}</strong>, {fmtDate(c.next.startsAt, { month: "short", day: "numeric" })}</div>}
                     <div className="flex gap-2 mt-auto">
-                      <button className="btn btn-sm flex-1" onClick={() => setCal(cal === c.name ? null : c.name)}>
+                      <button className="btn btn-sm flex-1" onClick={() => showCalendar(c.name)}>
                         <Calendar size={15} /> {cal === c.name ? "Showing" : "Events"}
                       </button>
                       <button className={`btn btn-sm ${following ? "btn-primary" : ""}`} aria-pressed={following}
@@ -148,7 +154,7 @@ export function Discover({ drawerId }) {
 
         <section className="flex flex-col gap-3" aria-labelledby="res-h">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 id="res-h" className="panel-title" style={{ fontSize: "1.6rem" }}>
+            <h2 id="res-h" className="panel-title" style={{ fontSize: "1.6rem", scrollMarginTop: 96 }}>
               {filtered ? [cal, cat, q.trim() && `“${q.trim()}”`].filter(Boolean).join(" · ") : "All upcoming"}
             </h2>
             <span className="tag">{results.length} event{results.length === 1 ? "" : "s"}</span>
