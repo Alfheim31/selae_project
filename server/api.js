@@ -616,6 +616,10 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const brief = (m) => ({ id: orgById.get(m.orgId).id, name: orgById.get(m.orgId).name });
       return { user: { ...req.user, ...role, profile: profileView(profile), mustChangePassword: req.user.tempPassword,
         hostsFor: hostOrgs(store.data, req.user, admins).map((o) => ({ id: o.id, name: o.name })),
+        // This account's own tickets, newest first, so a shared browser never shows someone else's
+        tickets: store.data.registrations.filter((r) => r.userId === req.user.id)
+          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+          .map((r) => ({ code: r.code, eventId: r.eventId })),
         officerOf: mine.filter((m) => m.status === "active").map(brief),
         invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m) })) } };
     }],

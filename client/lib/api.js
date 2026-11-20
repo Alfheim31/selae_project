@@ -18,15 +18,9 @@ export const hostKeys = {
   add(eventId, key) { save(KEYS, { ...hostKeys.all(), [eventId]: key }); },
 };
 
-export const myTickets = {
-  all: () => load(TICKETS, []),
-  add(code, eventId) {
-    const list = myTickets.all().filter((t) => t.code !== code);
-    save(TICKETS, [{ code, eventId, savedAt: new Date().toISOString() }, ...list]);
-  },
-  forEvent: (eventId) => myTickets.all().find((t) => t.eventId === eventId) || null,
-  remove(code) { save(TICKETS, myTickets.all().filter((t) => t.code !== code)); },
-};
+// Tickets used to be remembered by the browser, so whoever signed in next on a shared device saw them.
+// They now come from the account (/api/me → tickets); the old browser copy is cleared.
+try { localStorage.removeItem(TICKETS); } catch { /* private mode */ }
 
 export const follows = {
   all: () => load(FOLLOWS, []),
@@ -106,9 +100,7 @@ export const api = {
   update: (id, fields) => request("PATCH", `/api/events/${id}`, fields),
   // Uses the signed-in student's profile
   async register(id) {
-    const out = await request("POST", `/api/events/${id}/register`, {});
-    myTickets.add(out.ticket.code, id);
-    return out;
+    return request("POST", `/api/events/${id}/register`, {});
   },
   ticket: (code) => request("GET", `/api/tickets/${code}`),
   cancel: (code) => request("POST", `/api/tickets/${code}/cancel`),

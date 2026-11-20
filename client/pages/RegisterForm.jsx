@@ -6,7 +6,7 @@ import { returnTo, useMe } from "../lib/account.js";
 import { api } from "../lib/api.js";
 
 export function RegisterForm({ event }) {
-  const { me } = useMe();
+  const { me, reload } = useMe();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const full = event.spotsLeft <= 0;
@@ -56,6 +56,8 @@ export function RegisterForm({ event }) {
     setBusy(true); setError("");
     try {
       const out = await api.register(event.id);
+      // The account now has this ticket, so Discover and the event page show it
+      await reload();
       go(`t/${out.ticket.code}`);
     } catch (err) {
       setError(err.message);

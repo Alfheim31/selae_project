@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { flightNo, fmtDate, fmtTime, go, goBack, skyOf, Trails } from "../components/shared.jsx";
 import { ErrorBox, TicketSkeleton, usePolled } from "../components/ui.jsx";
-import { api, myTickets } from "../lib/api.js";
+import { api } from "../lib/api.js";
 
 /* ---------------- ticket: a boarding pass ---------------- */
 const prettyCode = (c) => `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8)}`;
@@ -13,7 +13,6 @@ export function TicketPage({ code }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
 
-  useEffect(() => { if (ticket && ticket.event) myTickets.add(code, ticket.event.id); }, [ticket, code]);
 
   if (error && !ticket) return <div className="narrow py-8"><ErrorBox message={error} /></div>;
   if (!ticket) return <TicketSkeleton />;

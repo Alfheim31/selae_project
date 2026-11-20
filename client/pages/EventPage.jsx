@@ -4,13 +4,14 @@ import { categoryIcon, isLive } from "../components/EventPass.jsx";
 import { Lightbox } from "../components/Lightbox.jsx";
 import { Cover, fmtDate, fmtTime, formatName, go, goBack, skyOf } from "../components/shared.jsx";
 import { ErrorBox, EventPageSkeleton, usePolled } from "../components/ui.jsx";
-import { api, myTickets } from "../lib/api.js";
+import { api } from "../lib/api.js";
+import { useSavedTicket } from "../lib/tickets.js";
 import { RegisterForm } from "./RegisterForm.jsx";
 
 /* ---------------- event page ---------------- */
 export function EventPage({ id }) {
   const [event, error] = usePolled(() => api.event(id), [id], 8000);
-  const saved = myTickets.forEvent(id);
+  const saved = useSavedTicket(id);
   const [ticket] = usePolled(() => (saved ? api.ticket(saved.code) : Promise.resolve(null)), [id, saved && saved.code], 0);
   const [lightbox, setLightbox] = useState(-1);
   const active = ticket && ticket.status !== "cancelled";

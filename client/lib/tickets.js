@@ -1,10 +1,21 @@
 import { useMemo } from "react";
 import { usePolled } from "../components/ui.jsx";
-import { api, myTickets } from "./api.js";
+import { useMe } from "./account.js";
+import { api } from "./api.js";
 
 /* ---------------- your events ---------------- */
+// The signed-in account's tickets (from /api/me), never ones another account left in this browser
+const savedOf = (me) => (me && me.tickets) || [];
+
+// This account's ticket for one event ({ code, eventId }), or null
+export function useSavedTicket(eventId) {
+  const { me } = useMe();
+  return savedOf(me).find((t) => t.eventId === eventId) || null;
+}
+
 export function useTickets() {
-  const saved = myTickets.all();
+  const { me } = useMe();
+  const saved = savedOf(me);
   const [tickets] = usePolled(
     () => Promise.all(saved.map((t) => api.ticket(t.code).catch(() => null))),
     [saved.map((t) => t.code).join()], 15000,

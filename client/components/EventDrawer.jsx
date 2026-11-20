@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Settings, Sparkles, Ticket, X } from "lucide-react";
-import { api, myTickets } from "../lib/api.js";
+import { api } from "../lib/api.js";
+import { useSavedTicket } from "../lib/tickets.js";
 import { categoryIcon, isLive, TicketPill } from "./EventPass.jsx";
 import { Lightbox } from "./Lightbox.jsx";
 import { Barcode, Cover, flightNo, fmtDate, fmtTime, go } from "./shared.jsx";
@@ -9,7 +10,7 @@ import { ErrorBox, Sk, usePolled } from "./ui.jsx";
 /* ---------------- slide-over: event details ---------------- */
 export function EventDrawer({ id, onClose }) {
   const [event, error] = usePolled(() => api.event(id), [id], 8000);
-  const saved = myTickets.forEvent(id);
+  const saved = useSavedTicket(id);
   const [ticket] = usePolled(() => (saved ? api.ticket(saved.code) : Promise.resolve(null)), [id, saved && saved.code], 0);
   const closeRef = useRef(null);
   const [lightbox, setLightbox] = useState(-1);

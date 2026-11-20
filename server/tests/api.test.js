@@ -152,6 +152,17 @@ test("promoting past capacity needs confirmation", async (t) => {
   assert.equal(regOf(store, id, "2099-00002").status, "going");
 });
 
+test("each account sees only its own tickets", async (t) => {
+  const { call, event, register } = setup(t);
+  const { id } = await event();
+  const ana = (await register(id, "2099-00001")).json.ticket.code;
+  const ben = (await register(id, "2099-00002")).json.ticket.code;
+  const mine = async (uid) => (await call("GET", "/api/me", null, { headers: { authorization: `Bearer ${uid}` } })).json.user.tickets;
+  assert.deepEqual(await mine("s:2099-00001"), [{ code: ana, eventId: id }]);
+  assert.deepEqual(await mine("s:2099-00002"), [{ code: ben, eventId: id }]);
+  assert.deepEqual(await mine("s:2099-00003"), []);
+});
+
 test("registering needs a signed-in student with a profile, and uses that profile", async (t) => {
   const { store, call, event, register } = setup(t);
   const { id } = await event(500);
