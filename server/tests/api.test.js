@@ -442,6 +442,43 @@ test("only the superadmin adds, edits, and disables organizations", async (t) =>
   assert.ok((await call("GET", "/api/admin/orgs", null, as("boss@gmail.com"))).json.orgs.some((o) => o.id === id && o.email === "ben@gmail.com"));
 });
 
+test("the superadmin's report counts each organization's events and attendance, and says who led", async (t) => {
+  const { call, store } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const { summarize } = await import("../../client/lib/report.js");
+  const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  store.mutate((d) => {
+    d.orgs.push({ id: "o2", name: "GDG", email: "gdg@gmail.com", type: "academic" }, { id: "o3", name: "Old Club", email: "old@gmail.com", disabled: true, disabledAt: ago(24) });
+    const ev = (id, orgId, start) => ({ id, orgId, hostName: "x", title: id, startsAt: ago(start), endsAt: ago(start - 2), capacity: 50, visibility: "public" });
+    d.events.push(ev("a", "test-org", 30), ev("b", "test-org", 20), ev("c", "o2", 10), { ...ev("sim", "o2", 10), simulated: true }, ev("later", "o2", -48));
+    const reg = (id, eventId, status, checkedIn) => ({ id, eventId, code: id.toUpperCase().padEnd(10, "X"), studentId: `2024-${id}`, email: "", status,
+      createdAt: ago(100), checkin: checkedIn ? { time: ago(25), method: "qr", confidence: 1 } : null });
+    d.registrations.push(reg("r1", "a", "going", true), reg("r2", "a", "going", false), reg("r3", "b", "going", true),
+      reg("r4", "c", "going", true), reg("r5", "c", "going", true), reg("r6", "c", "cancelled", false), reg("r7", "sim", "going", true));
+  });
+  const q = `?from=${encodeURIComponent(ago(24 * 30))}&to=${encodeURIComponent(new Date(Date.now() + 7 * 86400e3).toISOString())}`;
+  assert.equal((await call("GET", `/api/admin/report${q}`, null, as("ana@gmail.com"))).status, 403);
+  assert.equal((await call("GET", "/api/admin/report?from=x&to=y", null, as("boss@gmail.com"))).status, 400);
+  const res = await call("GET", `/api/admin/report${q}`, null, as("boss@gmail.com"));
+  assert.equal(res.status, 200);
+  // The PDF says which superadmin made it
+  assert.deepEqual(res.json.generatedBy, { name: "", email: "boss@gmail.com", role: "Superadmin" });
+  // Counts only, and no simulated history
+  assert.equal(res.json.events.some((e) => e.id === "sim"), false);
+  assert.equal(JSON.stringify(res.json).includes("2024-r1"), false);
+
+  const s = summarize(res.json);
+  const row = (id) => s.orgs.find((o) => o.id === id);
+  assert.deepEqual([row("test-org").conducted, row("test-org").going, row("test-org").attended], [2, 3, 2]);
+  assert.deepEqual([row("o2").conducted, row("o2").upcoming, row("o2").going, row("o2").attended], [1, 1, 2, 2]);
+  assert.equal(row("o2").rate, 1);
+  // Deactivated organizations go last
+  assert.equal(s.orgs[s.orgs.length - 1].id, "o3");
+  assert.match(s.conclusions[0], /^Test Org conducted the most events .* with 2 events\.$/);
+  assert.ok(s.conclusions.some((c) => /Test Org and GDG drew the most attendees, 2 students each/.test(c)));
+  assert.ok(s.conclusions.some((c) => /Old Club is deactivated/.test(c)));
+});
+
 test("a deactivated organization is deleted 30 days later with its officers, unless it's reactivated first", async (t) => {
   const { call, store, handle } = setup(t);
   const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });

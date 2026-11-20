@@ -90,6 +90,7 @@ export const api = {
   removeOfficer: (id) => request("DELETE", `/api/org/members/${id}`),
   answerInvite: (id, choice) => request("POST", `/api/me/invites/${id}/${choice}`),
   adminOrgs: () => request("GET", "/api/admin/orgs"),
+  adminReport: (from, to) => request("GET", `/api/admin/report?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`),
   createOrg: (body) => request("POST", "/api/admin/orgs", body),
   updateOrg: (id, body) => request("PATCH", `/api/admin/orgs/${id}`, body),
   resendOrgPassword: (id) => request("POST", `/api/admin/orgs/${id}/password`),

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { BellRing, Calendar, Search, UserPlus, X } from "lucide-react";
 import { EventDrawer } from "../components/EventDrawer.jsx";
 import { CATEGORIES, EventPass } from "../components/EventPass.jsx";
@@ -7,6 +7,9 @@ import { DiscoverSkeleton, ErrorBox, usePolled } from "../components/ui.jsx";
 import { returnTo, useMe } from "../lib/account.js";
 import { api, follows } from "../lib/api.js";
 import { hostsEvent, useTickets } from "../lib/tickets.js";
+
+// Only the superadmin sees it, so it (and its chart library) loads only for them
+const OrgReport = lazy(() => import("./admin/OrgReport.jsx").then((m) => ({ default: m.OrgReport })));
 
 /* ---------------- discover ---------------- */
 function boardStatus(e, now = Date.now()) {
@@ -82,6 +85,8 @@ export function Discover({ drawerId }) {
       <div className="wrap py-8 flex flex-col gap-10" style={{ maxWidth: 1240 }}>
         {error && <ErrorBox message={error} />}
         {!events && !error && <DiscoverSkeleton />}
+
+        {me && me.role === "superadmin" && <Suspense fallback={null}><OrgReport /></Suspense>}
 
         {mine.length > 0 && (
           <section className="flex flex-col gap-3" aria-labelledby="mine-h">

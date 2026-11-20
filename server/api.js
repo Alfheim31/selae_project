@@ -764,12 +764,45 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       });
     }],
 
+    /* ---------- superadmin: organizations report ---------- */
+    // Every real event (not the simulated history) that starts between from and to, with its counts only:
+    // no student names or details leave the server for this. The page and the PDF do the totals.
+    ["GET", /^\/api\/admin\/report$/, (req, _m, url) => {
+      requireSuperadmin(req);
+      const from = Date.parse(url.searchParams.get("from") || ""), to = Date.parse(url.searchParams.get("to") || "");
+      if (Number.isNaN(from) || Number.isNaN(to) || to < from) fail(400, "Choose a start and an end date.");
+      if (to - from > 3 * 366 * DAY_MS) fail(400, "Choose a period of three years or less.");
+      const d = store.data;
+      const now = Date.now();
+      const byEvent = new Map();
+      for (const r of d.registrations) {
+        const c = byEvent.get(r.eventId) || { registered: 0, going: 0, waitlist: 0, cancelled: 0, attended: 0, walkIns: 0 };
+        if (r.status === "cancelled") c.cancelled++;
+        else { c.registered++; if (r.status === "going") c.going++; else if (r.status === "waitlist") c.waitlist++; }
+        if (r.checkin) c.attended++;
+        if (r.walkIn) c.walkIns++;
+        byEvent.set(r.eventId, c);
+      }
+      const events = d.events
+        .filter((e) => !e.simulated && Date.parse(e.startsAt) >= from && Date.parse(e.startsAt) <= to)
+        .map((e) => ({
+          id: e.id, orgId: e.orgId || null, hostName: e.hostName || null, title: e.title, category: e.category || "General",
+          startsAt: e.startsAt, endsAt: e.endsAt, capacity: e.capacity, isPast: Date.parse(e.endsAt) < now,
+          ...(byEvent.get(e.id) || { registered: 0, going: 0, waitlist: 0, cancelled: 0, attended: 0, walkIns: 0 }),
+        }))
+        .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+      const orgs = (d.orgs || []).map((o) => ({ id: o.id, name: o.name, type: o.type || null, disabled: Boolean(o.disabled), disabledAt: o.disabledAt || null }));
+      // Who made it, printed on the PDF (taken from the sign-in, not from anything the page sends)
+      const generatedBy = { name: req.user.name || "", email: req.user.email, role: "Superadmin" };
+      return { from: new Date(from).toISOString(), to: new Date(to).toISOString(), generatedAt: new Date(now).toISOString(), generatedBy, orgs, events };
+    }],
+
     /* ---------- superadmin: organizations ---------- */
     ["GET", /^\/api\/admin\/orgs$/, (req) => {
       requireSuperadmin(req);
       const d = store.data;
       const now = Date.now();
-      return { orgs: [...(d.orgs || [])].sort((a, b) => a.name.localeCompare(b.name)).map((o) => ({ ...o,
+      return { orgs: [...(d.orgs || [])].sort((a, b) => (Boolean(a.disabled) - Boolean(b.disabled)) || a.name.localeCompare(b.name)).map((o) => ({ ...o,
         events: d.events.filter((e) => e.orgId === o.id).length,
         upcoming: d.events.filter((e) => e.orgId === o.id && new Date(e.endsAt).getTime() > now).length,
         officers: (d.orgMembers || []).filter((m) => m.orgId === o.id && m.status === "active").length })) };
