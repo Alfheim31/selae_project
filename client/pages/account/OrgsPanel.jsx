@@ -41,9 +41,10 @@ const ORGS_CSS = `
 .orgcard{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden;
   box-shadow:var(--shadow);transition:transform .15s ease,box-shadow .15s ease}
 .orgcard:hover{transform:translateY(-2px);box-shadow:0 14px 30px -16px rgba(20,27,58,.35)}
-.orgcard .band{height:70px;position:relative}
-.orgcard .band .tag{position:absolute;top:.7rem;left:.85rem;color:rgba(255,255,255,.9)}
-.orgav{width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;border:4px solid var(--surface);
+.orgcard .band{height:70px;position:relative;background-size:cover;background-position:center}
+.orgcard .band .tag{position:absolute;top:.7rem;left:.85rem;color:#fff;text-shadow:0 1px 6px rgba(20,27,58,.55)}
+.orgav{position:relative;z-index:1;width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;border:4px solid var(--surface);overflow:hidden;
+  background-size:cover;background-position:center;
   font-family:var(--f-display);font-weight:700;font-size:1.5rem;text-shadow:0 1px 6px rgba(20,27,58,.35);box-shadow:0 6px 16px -8px rgba(20,27,58,.45)}
 .orgmeta{display:flex;flex-wrap:wrap;justify-content:center;gap:.25rem .9rem}
 .orgmeta span{display:inline-flex;align-items:center;gap:.3rem}
@@ -62,6 +63,7 @@ export function OrgsPanel() {
   const [kind, setKind] = useState("all");
   const [page, setPage] = useState(0);
   const [notice, setNotice] = useState(null); // { org, credentials } after a password goes out
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     api.adminOrgs().then((r) => setOrgs(r.orgs)).catch((e) => setError(e.message));
@@ -96,13 +98,33 @@ export function OrgsPanel() {
   return (
     <div className="flex flex-col gap-5">
       <style>{ORGS_CSS}</style>
-      <div style={{ textAlign: "center" }}>
-        <div className="tag mb-2">Admin console</div>
-        <h2 className="display" style={{ fontSize: "2.4rem", textTransform: "uppercase" }}>Organizations</h2>
-        <p className="muted text-sm mt-2" style={{ maxWidth: "62ch", margin: ".5rem auto 0" }}>
-          Adding an organization emails a temporary password to its official email. The first time they sign in,
-          SELAE asks them to choose their own.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="tag">Admin console</div>
+          <h2 className="panel-title" style={{ fontSize: "1.9rem", marginTop: 2 }}>Organizations</h2>
+          <p className="muted text-sm" style={{ maxWidth: "62ch", marginTop: 4 }}>
+            Adding an organization emails a temporary password to its official email. The first time they sign in,
+            SELAE asks them to choose their own.
+          </p>
+        </div>
+        <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={17} /> Add organization</button>
+      </div>
+
+      {/* Filter by kind and search, right under the heading */}
+      <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginTop: -6 }}>
+        <div className="orgchips" role="group" aria-label="Kind of organization" style={{ justifyContent: "flex-start" }}>
+          {FILTERS.map(([k, label]) => (
+            <button key={k} className="orgchip" aria-pressed={kind === k} onClick={() => { setKind(k); setPage(0); }}>
+              {label} <span className="c">{orgs ? countOf(k) : "·"}</span>
+            </button>
+          ))}
+        </div>
+        {all.length > 0 && (
+          <label className="field" style={{ width: "min(320px, 100%)" }}>
+            <Search size={16} />
+            <input className="input" placeholder="Search name or email" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} maxLength={80} aria-label="Search organizations" />
+          </label>
+        )}
       </div>
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
@@ -117,28 +139,12 @@ export function OrgsPanel() {
         ))}
       </div>
 
-      <NewOrg onAdded={added} />
+      {adding && <NewOrg onAdded={(r) => { setAdding(false); added(r); }} onClose={() => setAdding(false)} />}
 
       {notice && <CredentialsNotice {...notice} onClose={() => setNotice(null)} />}
       {error && <ErrorBox message={error} />}
 
-      <section className="flex flex-col gap-4" aria-labelledby="allorgs-h">
-        <div className="flex flex-col items-center gap-3" style={{ textAlign: "center" }}>
-          <h3 id="allorgs-h" className="panel-title" style={{ fontSize: "1.5rem" }}>All organizations</h3>
-          <div className="orgchips" role="group" aria-label="Kind of organization">
-            {FILTERS.map(([k, label]) => (
-              <button key={k} className="orgchip" aria-pressed={kind === k} onClick={() => { setKind(k); setPage(0); }}>
-                {label} <span className="c">{orgs ? countOf(k) : "·"}</span>
-              </button>
-            ))}
-          </div>
-          {all.length > 0 && (
-            <label className="field" style={{ width: "min(360px, 100%)" }}>
-              <Search size={16} />
-              <input className="input" placeholder="Search name or email" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} maxLength={80} />
-            </label>
-          )}
-        </div>
+      <section className="flex flex-col gap-4" aria-label="All organizations">
 
         {!orgs && !error && (
           <div className="orggrid" role="status" aria-busy="true" aria-label="Loading">
@@ -156,7 +162,7 @@ export function OrgsPanel() {
           <div className="panel flex flex-col items-center gap-2" style={{ padding: "2.5rem 1rem", textAlign: "center" }}>
             <span className="orgav" style={{ background: skyFor("empty") }}><Building2 size={24} /></span>
             <div style={{ fontWeight: 700 }}>No organizations yet</div>
-            <p className="muted text-sm">Add the first one above. Its sign-in details go to its official email.</p>
+            <p className="muted text-sm">Use Add organization to add the first one. Its sign-in details go to its official email.</p>
           </div>
         )}
         {orgs && all.length > 0 && !shown.length && (
@@ -214,37 +220,46 @@ function CredentialsNotice({ org, credentials, onClose }) {
   );
 }
 
-function NewOrg({ onAdded }) {
+// Opened from the Add organization button
+function NewOrg({ onAdded, onClose }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [type, setType] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    const esc = (e) => { if (e.key === "Escape" && !busy) onClose(); };
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [busy, onClose]);
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setError("");
     try {
       onAdded(await api.createOrg({ name, email, type }));
-      setName(""); setEmail(""); setType("");
+      return;
     } catch (err) { setError(err.message); }
     setBusy(false);
   };
 
   return (
-    <form onSubmit={submit} className="panel flex flex-col gap-3" noValidate style={{ overflow: "hidden", padding: 0 }}>
-      <div className="sky flex items-center gap-3" style={{ padding: "1rem 1.2rem" }}>
-        <span style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,.22)", display: "flex", alignItems: "center",
-          justifyContent: "center", flexShrink: 0 }}><Plus size={20} /></span>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>Add an organization</div>
-          <div className="text-sm" style={{ color: "rgba(255,255,255,.85)" }}>We'll email a temporary password to the official email.</div>
+    <div className="modal-bg" onPointerDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <form onSubmit={submit} className="modal flex flex-col gap-3" role="dialog" aria-modal="true" aria-labelledby="neworg-h" noValidate
+        style={{ maxWidth: 480, padding: 0 }}>
+        <div className="sky flex items-center gap-3" style={{ padding: "1rem 1.2rem" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,.22)", display: "flex", alignItems: "center",
+            justifyContent: "center", flexShrink: 0 }}><Building2 size={20} /></span>
+          <div className="flex-1 min-w-0">
+            <div id="neworg-h" style={{ fontWeight: 700, fontSize: "1.05rem" }}>Add an organization</div>
+            <div className="text-sm" style={{ color: "rgba(255,255,255,.85)" }}>We'll email a temporary password to the official email.</div>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy} aria-label="Close" style={{ color: "#fff" }}><X size={18} /></button>
         </div>
-      </div>
-      <div className="flex flex-col gap-3" style={{ padding: "0 1.2rem 1.2rem" }}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.2fr_1fr_auto] gap-3 items-end">
+        <div className="flex flex-col gap-3" style={{ padding: "0 1.2rem 1.2rem" }}>
           <label><span className="lbl">Organization name</span>
-            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Computer Science Society" required />
+            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Computer Science Society" required autoFocus />
           </label>
           <label><span className="lbl">Official email</span>
             <input className="inp" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={120} placeholder="css.official@gmail.com" required />
@@ -255,13 +270,16 @@ function NewOrg({ onAdded }) {
               {ORG_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
             </select>
           </label>
-          <button className="btn btn-primary" type="submit" disabled={busy || !name.trim() || !email.trim() || !type} style={{ height: 44 }}>
-            <Plus size={17} /> {busy ? "Adding…" : "Add"}
-          </button>
+          {error && <ErrorBox message={error} />}
+          <div className="flex justify-end gap-2" style={{ marginTop: 4 }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn btn-primary" type="submit" disabled={busy || !name.trim() || !email.trim() || !type}>
+              <Plus size={17} /> {busy ? "Adding…" : "Add organization"}
+            </button>
+          </div>
         </div>
-        {error && <ErrorBox message={error} />}
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }
 
@@ -304,7 +322,7 @@ function OrgCard({ org, onChange, onCredentials }) {
 
   return (
     <article className="orgcard" style={{ opacity: org.disabled && !editing ? 0.75 : 1 }}>
-      <div className="band" style={{ background: skyFor(org.id), filter: org.disabled ? "grayscale(1)" : "none" }}>
+      <div className="band" style={{ background: org.cover ? `center / cover no-repeat url("${org.cover}")` : skyFor(org.id), filter: org.disabled ? "grayscale(1)" : "none" }}>
         <span className="tag">{typeLabel(org.type)}</span>
       </div>
       {editing ? (
@@ -326,7 +344,9 @@ function OrgCard({ org, onChange, onCredentials }) {
       ) : (
         <>
           <div className="flex flex-col items-center gap-1.5 flex-1" style={{ padding: "0 1rem 1rem", marginTop: -32, textAlign: "center" }}>
-            <span className="orgav" style={{ background: skyFor(org.id), filter: org.disabled ? "grayscale(1)" : "none" }}>{initials(org.name)}</span>
+            <span className="orgav" style={{ background: org.logo ? `center / cover no-repeat url("${org.logo}")` : skyFor(org.id), filter: org.disabled ? "grayscale(1)" : "none" }}>
+              {org.logo ? "" : initials(org.name)}
+            </span>
             <div style={{ fontWeight: 700, fontSize: "1.08rem", marginTop: 4, color: org.disabled ? "var(--muted)" : "var(--text)" }}>{org.name}</div>
             <div className="muted text-sm" style={{ overflowWrap: "anywhere" }}>{org.email}</div>
             <span className="pill" style={org.disabled ? { background: "var(--raised)", color: "var(--muted)" } : { background: "#E2F4EA", color: "#14794B" }}>
