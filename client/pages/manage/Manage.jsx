@@ -67,7 +67,7 @@ export function Manage({ id, tab, scan }) {
   if (!data) {
     return (
       <>
-        <TopBar route="" />
+        <TopBar route="" wide />
         {error ? (
           <div className="narrow py-10">
             <div className="panel p-6 flex flex-col gap-3">
@@ -99,7 +99,7 @@ export function Manage({ id, tab, scan }) {
 
   return (
     <>
-      <TopBar route="" />
+      <TopBar route="" wide />
       <div className="flex" style={{ minHeight: "calc(100vh - 65px)" }}>
         <aside className="rail hidden md:flex flex-col w-60 shrink-0 p-4 gap-5">
           <div className="flex items-center gap-3 px-1">

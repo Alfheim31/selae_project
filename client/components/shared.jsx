@@ -136,6 +136,8 @@ textarea.inp{resize:vertical;min-height:110px}
 .notif .ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)}
 /* layout */
 .wrap{max-width:1120px;margin-left:auto;margin-right:auto;padding-left:16px;padding-right:16px}
+/* Top bar over the Manage page: the logo lines up with the sidebar's buttons, the right edge with the content */
+@media (min-width:768px){.wrap.topwide{padding-left:16px;padding-right:24px}}
 .narrow{max-width:780px;margin-left:auto;margin-right:auto;padding-left:16px;padding-right:16px}
 .page-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem}
 .page-title{font-family:var(--f-display);font-weight:700;font-size:clamp(2.6rem,7vw,4.2rem);line-height:.9;letter-spacing:.01em;text-transform:uppercase}

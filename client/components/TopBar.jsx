@@ -6,14 +6,15 @@ import { NotificationBell } from "./NotificationBell.jsx";
 import { fmtTime, go, Mark } from "./shared.jsx";
 
 /* ---------------- top bar ---------------- */
-export function TopBar({ route }) {
+// wide: full width, lined up with a page that runs edge to edge (the Manage page's sidebar and content)
+export function TopBar({ route, wide = false }) {
   const at = (p) => (route === p ? "page" : undefined);
   const account = useMe();
   const { me } = account;
   const canHost = Boolean(me && me.hostsFor && me.hostsFor.length);
   return (
     <header className="topbar">
-      <div className="wrap flex items-center justify-between gap-2" style={{ height: 64, maxWidth: 1240 }}>
+      <div className={`wrap flex items-center justify-between gap-2${wide ? " topwide" : ""}`} style={{ height: 64, maxWidth: wide ? "none" : 1240 }}>
         <div className="flex items-center gap-2 sm:gap-6 min-w-0">
           <button className="brand" onClick={() => go("")} aria-label="SELAE home">
             <Mark /><span className="word hidden sm:inline">SELAE</span>
