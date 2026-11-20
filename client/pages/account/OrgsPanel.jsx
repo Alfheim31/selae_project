@@ -87,10 +87,11 @@ export function OrgsPanel() {
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    api.adminOrgs().then((r) => setOrgs(r.orgs)).catch((e) => setError(e.message));
+    api.adminOrgs().then((r) => setOrgs(sortByName(r.orgs))).catch((e) => setError(e.message));
   }, []);
 
-  const sortByName = (list) => [...list].sort((a, b) => a.name.localeCompare(b.name));
+  // Active ones first, by name; deactivated ones at the end of the list
+  const sortByName = (list) => [...list].sort((a, b) => (Boolean(a.disabled) - Boolean(b.disabled)) || a.name.localeCompare(b.name));
   // Edits come back without the counts, so keep the ones we have
   const replace = (org) => setOrgs((list) => sortByName(list.map((o) => (o.id === org.id ? { ...o, ...org } : o))));
   const added = ({ org, credentials }) => {
