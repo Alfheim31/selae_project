@@ -80,6 +80,10 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       show({ type: "approved", student, method, confidence, time: new Date(res.time), learned: Boolean(res.learned), added: Boolean(res.added) });
       beep("ok");
       later(() => reset(false), 3500);
+    } else if (res.outcome === "checkout") {
+      show({ type: "checkout", student, method, time: new Date(res.time), checkin: { ...res.checkin, time: new Date(res.checkin.time) } });
+      beep("ok");
+      later(() => reset(false), 3500);
     } else if (res.outcome === "unresolved") {
       show({ type: "unknown", read: target.ticket || target.studentId });
       beep("error");
@@ -88,9 +92,11 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
       beep("attention");
     } else {
       show({ type: res.outcome, student, method, otherEvent: res.otherEvent,
-        previous: res.previous ? { ...res.previous, time: new Date(res.previous.time) } : null });
-      beep(res.outcome === "dup" ? "attention" : "error");
-      if (res.outcome === "dup") later(() => reset(false), 5000);
+        previous: res.previous ? { ...res.previous, time: new Date(res.previous.time) } : null,
+        checkout: res.checkout ? { ...res.checkout, time: new Date(res.checkout.time) } : null, checkoutAfterMinutes: res.checkoutAfterMinutes });
+      const repeat = res.outcome === "dup" || res.outcome === "dupout";
+      beep(repeat ? "attention" : "error");
+      if (repeat) later(() => reset(false), 5000);
     }
   };
 

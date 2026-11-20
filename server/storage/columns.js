@@ -65,6 +65,7 @@ export const TABLES = [
       ["student_suffix", "student.suffix", "text"], ["student_section", "student.section", "text"],
       ["face_descriptor", "faceDescriptor", "nums"],
       ["checkin_time", "checkin.time", "time"], ["checkin_method", "checkin.method", "text"], ["checkin_confidence", "checkin.confidence", "num"],
+      ["checkout_time", "checkout.time", "time"], ["checkout_method", "checkout.method", "text"],
     ],
     nulls: ["checkin"],
     after(rec) {

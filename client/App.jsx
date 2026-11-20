@@ -21,9 +21,9 @@ const AdminPage = named(() => import("./pages/AdminPage.jsx"), "AdminPage");
 const CreateEvent = named(() => import("./pages/CreateEvent.jsx"), "CreateEvent");
 const ChangePasswordPage = named(() => import("./pages/account/ChangePassword.jsx"), "ChangePasswordPage");
 
-const TABS = ["dashboard", "analytics", "photos", "tickets", "settings"];
+const TABS = ["dashboard", "analytics", "photos", "settings"];
 
-const LEGACY = { dashboard: "dashboard", scanner: "scan", analytics: "analytics", testids: "tickets" };
+const LEGACY = { dashboard: "dashboard", scanner: "scan", analytics: "analytics" };
 
 export default function App() {
   const route = useHashRoute();
@@ -60,7 +60,7 @@ export default function App() {
       parts[0] === "e" && parts[1] ? <EventPage id={parts[1]} /> :
       parts[0] === "t" && parts[1] ? <TicketPage code={parts[1]} /> :
       parts[0] === "create" ? <CreateEvent /> :
-      parts[0] === "profile" ? <ProfilePage /> :
+      parts[0] === "profile" ? <ProfilePage tab={parts[1]} /> :
       parts[0] === "admin" ? <AdminPage /> :
       parts[0] === "events" || parts[0] === "tickets" ? <EventsHome drawerId={parts[0] === "events" ? parts[1] || null : null} /> :
       <Discover drawerId={parts[0] === "discover" ? parts[1] || null : null} />;

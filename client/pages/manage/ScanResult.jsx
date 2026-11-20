@@ -1,13 +1,20 @@
 import { useState } from "react";
 import {
-  AlertTriangle, Ban, Brain, CalendarX, CheckCircle2, ChevronRight, Clock, HelpCircle, History, Keyboard, ScanLine, UserPlus, WifiOff,
+  AlertTriangle, Ban, Brain, CalendarX, CheckCircle2, ChevronRight, Clock, HelpCircle, History, Keyboard, LogOut, ScanLine, UserPlus, WifiOff,
 } from "lucide-react";
 import { SUFFIXES } from "../../components/StudentFields.jsx";
 import { fmtDateShort, fmtTime, formatName, METHOD_LABEL, pct } from "../../components/shared.jsx";
 
 export const sure = (p) => (p >= 0.995 ? "over 99%" : pct(p));
 
-const STATUS_NOTE = { inside: "Already checked in", waitlist: "On the waitlist", notreg: "Not registered for this event" };
+// "Scan again after 30 minutes to check them out." (the wait comes from the server)
+const afterText = (min) => {
+  if (!min) return "Scan again later to check them out.";
+  const t = min % 60 === 0 ? `${min / 60} hour${min === 60 ? "" : "s"}` : `${min} minute${min === 1 ? "" : "s"}`;
+  return `Scan again after ${t} to check them out.`;
+};
+
+const STATUS_NOTE = { inside: "Already checked in", out: "Already checked out", waitlist: "On the waitlist", notreg: "Not registered for this event" };
 
 function DigitDiff({ id, read }) {
   const a = id.replace(/\D/g, ""), b = String(read).replace(/\D/g, "");
@@ -148,13 +155,33 @@ export function ResultPanel({ phase, result, camera, live, capacity, data, onAdd
           <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "3.5s" }} /></div>
         </div>
       );
+    case "checkout":
+      return (
+        <div className="result dup">
+          <div className="state"><LogOut size={28} /> Checked out</div>
+          <div className="who">{formatName(result.student)}</div>
+          <Meta s={result.student} />
+          <p className="font-bold">Out at {fmtTime(result.time)}. Checked in at {fmtTime(result.checkin.time)}.</p>
+          <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "3.5s" }} /></div>
+        </div>
+      );
+    case "dupout":
+      return (
+        <div className="result dup">
+          <div className="state"><History size={28} /> Already checked out</div>
+          <div className="who">{formatName(result.student)}</div>
+          <Meta s={result.student} />
+          <p className="font-bold">Checked in at {fmtTime(result.previous.time)} and out at {fmtTime(result.checkout.time)}. Nothing new was recorded.</p>
+          <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "5s" }} /></div>
+        </div>
+      );
     case "dup":
       return (
         <div className="result dup">
           <div className="state"><History size={28} /> Already checked in</div>
           <div className="who">{formatName(result.student)}</div>
           <Meta s={result.student} />
-          <p className="font-bold">First checked in at {fmtTime(result.previous.time)} ({METHOD_LABEL[result.previous.method]}). No second entry was recorded.</p>
+          <p className="font-bold">Checked in at {fmtTime(result.previous.time)} ({METHOD_LABEL[result.previous.method]}). {afterText(result.checkoutAfterMinutes)}</p>
           <div className="countdown" aria-hidden="true"><div style={{ animationDuration: "5s" }} /></div>
         </div>
       );

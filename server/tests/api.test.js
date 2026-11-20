@@ -6,7 +6,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { openStore } from "../storage/store.js";
 import { unmappedFields } from "../storage/columns.js";
-import { createApi } from "../api.js";
+import { CHECKOUT_AFTER_MS, createApi } from "../api.js";
 
 /* Check-in rules, through the real routes */
 
@@ -16,7 +16,13 @@ const future = (h) => new Date(Date.now() + h * 3600e3).toISOString();
 
 // Fake logins for the tests: "Bearer <email>" signs in with Google, "Bearer pw:<email>" with a password
 const USERS = ["boss@gmail.com", "org@gmail.com", "ana@gmail.com", "ben@gmail.com", "host@gmail.com"];
+// "flaky:<email>" is a Google sign-in that Supabase can't check the first time it's asked
+const flaky = new Set();
 const fakeVerify = async (token) => {
+  if (token.startsWith("flaky:")) {
+    if (!flaky.has(token)) { flaky.add(token); throw new Error("Supabase answered 503"); }
+    token = token.slice(6);
+  }
   // "s:<anything>" is a student who signed up with a password
   if (token.startsWith("s:")) return { id: token, email: `${token.slice(2)}@school.test`, name: "", avatar: null, viaGoogle: false };
   // "acct:<email>:<orgId>[:temp]" is the account the server made for an org, signed in with its password
@@ -720,4 +726,53 @@ test("a new org gets an emailed temporary password, and must choose its own befo
   await call("PUT", "/api/me/profile", { studentId: "2024-55555", first: "Ana", last: "Reyes", section: "A" }, as("ana@gmail.com"));
   assert.equal((await call("POST", "/api/admin/orgs", { name: "Ana Org", email: "ana@gmail.com", type: "academic" }, admin)).status, 409);
   assert.ok(ev);
+});
+
+test("when Supabase can't check a sign-in, the server says try again instead of signed out", async (t) => {
+  const { call } = setup(t, { venueLaptop: false });
+  const as = { headers: { authorization: "Bearer flaky:ana@gmail.com" } };
+  const first = await call("GET", "/api/me", null, as);
+  assert.equal(first.status, 503);
+  // Not remembered as "nobody": the next try sees the account
+  const again = await call("GET", "/api/me", null, as);
+  assert.equal(again.status, 200);
+  assert.equal(again.json.user.email, "ana@gmail.com");
+});
+
+test("the profile counts the events the student was checked in at", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const a = await event(), b = await event();
+  await register(a.id, "2099-00001");
+  await register(b.id, "2099-00001");
+  const attended = async () => (await call("GET", "/api/me", null, { headers: { authorization: "Bearer s:2099-00001" } })).json.user.eventsAttended;
+  assert.equal(await attended(), 0);
+  store.mutate(() => { regOf(store, a.id, "2099-00001").checkin = { time: new Date().toISOString(), method: "qr" }; });
+  assert.equal(await attended(), 1);
+  // The list behind the "Events attended" tab: only the one they were checked in at
+  const list = await call("GET", "/api/me/attended", null, { headers: { authorization: "Bearer s:2099-00001" } });
+  assert.equal(list.json.total, 1);
+  assert.equal(list.json.events[0].eventId, a.id);
+  assert.equal(list.json.events[0].method, "qr");
+  assert.equal((await call("GET", "/api/me/attended")).status, 401);
+});
+
+test("a second scan after a few minutes checks the guest out, once", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const { id } = await event();
+  await register(id, "2099-00001");
+  const scan = async () => (await call("POST", `/api/events/${id}/checkin`, { studentId: "2099-00001", method: "face", confidence: 0.9 }, { from: LAPTOP })).json;
+  assert.equal((await scan()).outcome, "approved");
+  // Caught twice at the gate right away: still the same arrival
+  assert.equal((await scan()).outcome, "dup");
+  assert.equal(regOf(store, id, "2099-00001").checkout, undefined);
+  // Later, on the way out
+  store.mutate(() => { regOf(store, id, "2099-00001").checkin.time = new Date(Date.now() - CHECKOUT_AFTER_MS - 60000).toISOString(); });
+  const out = await scan();
+  assert.equal(out.outcome, "checkout");
+  assert.ok(out.checkout.time);
+  assert.equal(regOf(store, id, "2099-00001").checkout.method, "face");
+  // Only once; the attendance still counts
+  assert.equal((await scan()).outcome, "dupout");
+  const me = await call("GET", "/api/me", null, { headers: { authorization: "Bearer s:2099-00001" } });
+  assert.equal(me.json.user.eventsAttended, 1);
 });

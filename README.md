@@ -49,7 +49,6 @@ internet connection is needed (fonts and the OCR engine are bundled too).
 - **Photos** — once the event has ended, upload photos from the day (drag and drop
   or pick several; they're resized in the browser first). They show on the event
   page and in Discover, and guests who checked in get a notification.
-- **Test tickets** — printed student numbers for guests, to test or demo the scanner.
 - **Invite & settings** — a QR code and link to the registration page, a co-host
   link, and the event details, including the **cover photo** and closing
   registration.
@@ -317,10 +316,9 @@ real), and the held-out scores there become the ones to report.
 2. On the laptop, open the event's dashboard, press **Open scanner** and allow the camera.
 3. Hold the ID up to the webcam, close and steady. There is no button and no set
    position: it checks in by itself once it has read the student number twice.
-   Show it again later and you get "Already checked in".
-
-**Test tickets** has more student numbers to try: guests who will check in, guests
-already checked in, waitlisted guests, and students who aren't registered.
+   Show it again soon after and you get "Already checked in". Once the wait set by
+   `CHECKOUT_AFTER_MINUTES` in `server/api.js` has passed, a second scan checks the
+   guest out, and the guest list shows "Out at" the time.
 
 Leaving an ID in front of the camera won't repeat the result: the same number is
 ignored until it has been out of view for a minute.
@@ -363,7 +361,7 @@ client/
     account/           profile page, sign-in and sign-up, student profile form,
                        organizations (superadmin), officers (org), invitations (student)
     manage/            organizer console: Manage.jsx shell, dashboard, gate scanner and
-                       its result panel, analytics, matcher, photos, settings, test tickets
+                       its result panel, analytics, matcher, photos, settings
   components/
     shared.jsx         design system (styles), sky covers, barcodes, formatting, QR code, photo resizing
     TopBar.jsx         top bar and clock; AccountMenu.jsx and NotificationBell.jsx sit in it

@@ -85,12 +85,14 @@ textarea.inp{resize:vertical;min-height:110px}
 .chip.ocr{color:#4E5A00;border-color:#C8DD5A;background:#F3FAD1}
 .chip.confirmed{color:#8A4D06;border-color:#F0C48A;background:#FDF1E0}
 .chip.in{color:var(--ok);border-color:#A7DCC2;background:#E8F6EF}
+.chip.left{color:#3550D4;border-color:#C7D0F2;background:#EEF1FC}
 .pill{display:inline-flex;align-items:center;gap:.4rem;font-family:var(--f-mono);font-weight:500;font-size:.7rem;letter-spacing:.1em;
   text-transform:uppercase;padding:.28rem .6rem;border-radius:6px}
 .pill.going{background:#E2F4EA;color:#14794B}
 .pill.waitlist{background:#FDF0DE;color:#9A5A0B}
 .pill.cancelled{background:#FBE5E3;color:#B2332C}
 .pill.host{background:var(--accent-soft);color:var(--accent)}
+.pill.soft{background:var(--surface);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
 .pill.past{background:var(--raised);color:var(--muted)}
 .pill.lime{background:var(--lime);color:var(--lime-ink)}
 .seg{display:inline-flex;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:3px}
@@ -385,6 +387,7 @@ export const METHOD_SHORT = { qr: "QR", barcode: "ID barcode", face: "Face", ocr
 export const OUTCOME_LABEL = {
   approved: "Checked in", notreg: "Not registered", dup: "Already checked in", full: "Venue at capacity",
   unresolved: "Couldn't identify", waitlist: "On the waitlist", wrongevent: "Ticket for another event",
+  checkout: "Checked out", dupout: "Already checked out",
 };
 
 /* ---------------- event covers: sky art ---------------- */

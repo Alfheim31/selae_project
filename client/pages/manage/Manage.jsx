@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BarChart3, ExternalLink, Images, LayoutDashboard, QrCode as QrIcon, ScanLine, Settings, WifiOff, X } from "lucide-react";
+import { ArrowLeft, BarChart3, ExternalLink, Images, LayoutDashboard, ScanLine, Settings, WifiOff, X } from "lucide-react";
 import { TopBar } from "../../components/TopBar.jsx";
 import { Barcode, flightNo, fmtDate, fmtTime, go, goBack, skyOf, Trails, useToast } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
@@ -8,7 +8,6 @@ import { Dashboard } from "./Dashboard.jsx";
 import { PhotosPage } from "./PhotosPage.jsx";
 import { Scanner } from "./Scanner.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
-import { TestTickets } from "./TestTickets.jsx";
 import { ManageSkeleton } from "../../components/ui.jsx";
 
 /* ---------------- server state for one event ---------------- */
@@ -19,6 +18,8 @@ function toData(s) {
   const going = regs.filter((r) => r.status === "going");
   const waitlist = regs.filter((r) => r.status === "waitlist").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const checkins = new Map(regs.filter((r) => r.checkin).map((r) => [r.studentId, { ...r.checkin, time: new Date(r.checkin.time) }]));
+  // Guests who were checked in and then scanned again on their way out
+  const checkouts = new Map(regs.filter((r) => r.checkout).map((r) => [r.studentId, { ...r.checkout, time: new Date(r.checkout.time) }]));
   return {
     event: s.event,
     matcher: s.matcher || null,
@@ -26,7 +27,7 @@ function toData(s) {
     capacity: s.event.capacity,
     opens: new Date(s.event.startsAt),
     ends: new Date(s.event.endsAt),
-    byId, student, regs, going, waitlist, checkins,
+    byId, student, regs, going, waitlist, checkins, checkouts,
     registered: new Set(going.map((r) => r.studentId)),
     regByStudent: new Map(regs.filter((r) => r.status !== "cancelled").map((r) => [r.studentId, r])),
     students: going.map((r) => student(r.studentId)),
@@ -91,7 +92,6 @@ export function Manage({ id, tab, scan }) {
     { id: "dashboard", label: "Live dashboard", icon: LayoutDashboard },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "photos", label: "Photos", icon: Images, badge: (event.photos || []).length || null },
-    { id: "tickets", label: "Test tickets", icon: QrIcon },
     { id: "settings", label: "Invite & settings", icon: Settings },
   ];
   const live = now >= new Date(data.opens.getTime() - 3600000) && now <= data.ends;
@@ -163,7 +163,6 @@ export function Manage({ id, tab, scan }) {
             {tab === "dashboard" && <Dashboard data={data} now={now} refresh={refresh} onToast={setToast} onOpenScanner={openScanner} />}
             {tab === "analytics" && <Analytics data={data} now={now} onToast={setToast} refresh={refresh} />}
             {tab === "photos" && <PhotosPage data={data} now={now} refresh={refresh} onToast={setToast} />}
-            {tab === "tickets" && <TestTickets data={data} eventId={id} onOpenScanner={openScanner} />}
             {tab === "settings" && <SettingsPage data={data} eventId={id} refresh={refresh} />}
           </div>
         </main>

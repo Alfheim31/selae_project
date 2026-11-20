@@ -9,14 +9,14 @@ import { askConfirm } from "../../components/ConfirmDialog.jsx";
 import { arrivalBuckets, chartTip, everyLabel, MethodChip, OutcomeIcon } from "./bits.jsx";
 
 export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
-  const { students, registered, checkins, log, student, capacity, opens, ends, waitlist, event } = data;
+  const { students, registered, checkins, checkouts, log, student, capacity, opens, ends, waitlist, event } = data;
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const count = checkins.size;
   const fill = count / capacity;
   const fillColor = fill >= 1 ? "var(--bad)" : fill >= 0.9 ? "var(--warn)" : "var(--ok)";
   const last10 = [...checkins.values()].filter((c) => now - c.time <= 10 * 60000).length;
-  const attention = log.filter((l) => l.outcome !== "approved");
+  const attention = log.filter((l) => l.outcome !== "approved" && l.outcome !== "checkout");
   const { size, buckets } = useMemo(() => arrivalBuckets(checkins, now, opens, ends), [checkins, now, opens, ends]);
   const notYet = Math.max(0, registered.size - [...registered].filter((sid) => checkins.has(sid)).length);
   const [risk, setRisk] = useState(data.forecast ? data.forecast.defaultRisk : 0.05);
@@ -28,10 +28,10 @@ export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
     const n = norm(q);
     const base = filter === "waitlist" ? waitlist.map((r) => ({ ...student(r.studentId), reg: r })) : students.map((s) => ({ ...s }));
     return base
-      .filter((s) => (filter === "in" ? checkins.has(s.id) : filter === "out" ? !checkins.has(s.id) : true))
+      .filter((s) => (filter === "in" ? checkins.has(s.id) : filter === "out" ? !checkins.has(s.id) : filter === "left" ? checkouts.has(s.id) : true))
       .filter((s) => !n || norm(s.id).includes(n) || norm(s.last + s.first).includes(n) || norm(s.first + s.last).includes(n))
       .sort((a, b) => (filter === "waitlist" ? 0 : formatName(a).localeCompare(formatName(b))));
-  }, [students, waitlist, student, checkins, filter, q]);
+  }, [students, waitlist, student, checkins, checkouts, filter, q]);
 
   const promote = async (reg) => {
     const full = data.going.length >= data.capacity;
@@ -107,7 +107,7 @@ export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
             <div className="p-4 md:p-5 flex flex-wrap gap-3 items-center justify-between">
               <h2 className="font-bold text-lg">Guest list</h2>
               <div className="seg" role="group" aria-label="Filter guests">
-                {[["all", `Going ${registered.size}`], ["in", `Checked in ${count}`], ["out", `Not yet ${notYet}`],
+                {[["all", `Going ${registered.size}`], ["in", `Checked in ${count}`], ["left", `Checked out ${checkouts.size}`], ["out", `Not yet ${notYet}`],
                   ...(waitlist.length ? [["waitlist", `Waitlist ${waitlist.length}`]] : [])].map(([k, l]) => (
                   <button key={k} aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
                 ))}
@@ -131,6 +131,7 @@ export function Dashboard({ data, now, refresh, onToast, onOpenScanner }) {
                         <td className="muted">{s.id}</td>
                         <td className="muted">{s.section}</td>
                         <td>{s.reg ? <div className="flex items-center gap-3"><span className="chip confirmed">Waitlist since {fmtDateShort(s.reg.createdAt)}</span>{likely(s.reg)}</div>
+                          : c && checkouts.has(s.id) ? <span className="chip left" title={`In at ${fmtTime(c.time)}`}>Out at {fmtTime(checkouts.get(s.id).time)}</span>
                           : c ? <span className="chip in">In at {fmtTime(c.time)}</span>
                           : <div className="flex items-center gap-3"><span className="faint">Not yet</span>{likely(data.regByStudent.get(s.id))}</div>}</td>
                         <td>{s.reg ? <button className="btn btn-sm" onClick={() => promote(s.reg)}>Move to going</button>

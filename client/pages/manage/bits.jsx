@@ -1,4 +1,4 @@
-import { Ban, CalendarX, CheckCircle2, Clock, HelpCircle, History, XCircle } from "lucide-react";
+import { Ban, CalendarX, CheckCircle2, Clock, HelpCircle, History, LogOut, XCircle } from "lucide-react";
 import { fmtDateShort, fmtTime, METHOD_LABEL, METHOD_SHORT, OUTCOME_LABEL, pct } from "../../components/shared.jsx";
 
 /* ---------------- dashboard ---------------- */
@@ -37,6 +37,7 @@ export function OutcomeIcon({ outcome }) {
   const map = {
     approved: [CheckCircle2, "var(--ok)"], notreg: [XCircle, "#D4433B"], dup: [History, "#3550D4"],
     full: [Ban, "#D4433B"], unresolved: [HelpCircle, "var(--warn)"], waitlist: [Clock, "var(--warn)"], wrongevent: [CalendarX, "#D4433B"],
+    checkout: [LogOut, "#3550D4"], dupout: [History, "#3550D4"],
   };
   const [Icon, color] = map[outcome] || map.unresolved;
   return <Icon size={20} color={color} aria-label={OUTCOME_LABEL[outcome]} />;

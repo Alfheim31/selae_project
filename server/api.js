@@ -4,7 +4,7 @@ import path from "node:path";
 import { newCode, newId, hashKey } from "./seed/seed.js";
 import { ensureModel, rank, priorWeight, learn, pretty, digitsOf, topConfusions, digitAccuracy, emptyModel } from "./intelligence/matcher.js";
 import { trainTurnout, predictEvent, forecastNow, DEFAULT_RISK } from "./intelligence/forecast.js";
-import { createAuth, supabaseVerifier, emailList } from "./auth.js";
+import { createAuth, emailList, SignInUnavailable, supabaseVerifier } from "./auth.js";
 import { supabaseOrgAccounts } from "./orgAccounts.js";
 
 /* Logical layer */
@@ -109,7 +109,7 @@ function ticketView(data, req, reg) {
   const event = data.events.find((e) => e.id === reg.eventId);
   const student = noFace(reg.student || data.directory[reg.studentId]);
   return {
-    code: reg.code, status: reg.status, createdAt: reg.createdAt, checkin: reg.checkin,
+    code: reg.code, status: reg.status, createdAt: reg.createdAt, checkin: reg.checkin, checkout: reg.checkout || null,
     student, event: event ? publicEvent(data, req, event) : null,
   };
 }
@@ -184,6 +184,10 @@ function addRegistration(d, event, student, extra = {}) {
 }
 
 /* ---------- check-in rules ---------- */
+// A second scan this long after checking in checks the guest out; sooner, it's the same arrival seen twice.
+// To change it, change only the number of minutes here: the scanner's message and the tests follow it.
+export const CHECKOUT_AFTER_MINUTES = 30;
+export const CHECKOUT_AFTER_MS = CHECKOUT_AFTER_MINUTES * 60 * 1000;
 function checkIn(data, event, body, canLearn) {
   const now = new Date().toISOString();
   const method = ["qr", "barcode", "ocr", "face", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
@@ -216,7 +220,18 @@ function checkIn(data, event, body, canLearn) {
   const student = noFace(data.directory[studentId]) || { id: studentId, last: "", first: "", middle: "", suffix: "", section: "" };
   if (!reg || reg.status === "cancelled") { log("notreg", studentId); return { outcome: "notreg", time: now, student }; }
   if (reg.status === "waitlist") { log("waitlist", studentId); return { outcome: "waitlist", time: now, student }; }
-  if (reg.checkin) { log("dup", studentId); return { outcome: "dup", time: now, student, previous: reg.checkin }; }
+  if (reg.checkin) {
+    // Scanned again: checks them out. Not within the first few minutes, so the same face or ID caught
+    // twice at the gate isn't taken as leaving; and only once.
+    if (reg.checkout) { log("dupout", studentId); return { outcome: "dupout", time: now, student, previous: reg.checkin, checkout: reg.checkout }; }
+    if (Date.parse(now) - Date.parse(reg.checkin.time) < CHECKOUT_AFTER_MS) {
+      log("dup", studentId);
+      return { outcome: "dup", time: now, student, previous: reg.checkin, checkoutAfterMinutes: CHECKOUT_AFTER_MINUTES };
+    }
+    reg.checkout = { time: now, method };
+    log("checkout", studentId);
+    return { outcome: "checkout", time: now, student, checkin: reg.checkin, checkout: reg.checkout };
+  }
   if (body.forceFull || counts(data, event.id).checkedIn >= event.capacity) { log("full", studentId); return { outcome: "full", time: now, student }; }
   reg.checkin = { time: now, method, confidence };
   log("approved", studentId, { confidence });
@@ -235,7 +250,7 @@ function peopleFor(data, event) {
 function statusOf(reg) {
   if (!reg) return "notreg";
   if (reg.status === "waitlist") return "waitlist";
-  return reg.checkin ? "inside" : "going";
+  return reg.checkout ? "out" : reg.checkin ? "inside" : "going";
 }
 
 function matchRead(data, event, body) {
@@ -650,8 +665,27 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
         tickets: store.data.registrations.filter((r) => r.userId === req.user.id)
           .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
           .map((r) => ({ code: r.code, eventId: r.eventId })),
+        // Events this account was checked in at (the simulated history isn't anyone's)
+        eventsAttended: store.data.registrations.filter((r) => r.userId === req.user.id && r.checkin).length,
         officerOf: mine.filter((m) => m.status === "active").map(brief),
         invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m) })) } };
+    }],
+
+    // The events this account was checked in at, newest first: for the profile's "Events attended" tab
+    ["GET", /^\/api\/me\/attended$/, (req) => {
+      const user = requireUser(req);
+      const byId = new Map(store.data.events.map((e) => [e.id, e]));
+      const orgName = new Map((store.data.orgs || []).map((o) => [o.id, o.name]));
+      const events = store.data.registrations
+        .filter((r) => r.userId === user.id && r.checkin && byId.has(r.eventId))
+        .map((r) => {
+          const e = byId.get(r.eventId);
+          return { eventId: e.id, title: e.title, category: e.category || "General", venue: e.venue || "", startsAt: e.startsAt, endsAt: e.endsAt,
+            hostName: (e.orgId && orgName.get(e.orgId)) || e.hostName || "", coverImage: e.coverImage || null,
+            code: r.code, checkedInAt: r.checkin.time, method: r.checkin.method, walkIn: Boolean(r.walkIn) };
+        })
+        .sort((a, b) => String(b.startsAt).localeCompare(String(a.startsAt)));
+      return { total: events.length, events };
     }],
 
     // Sets the signed-in person's own password, which also ends a temporary one
@@ -1135,6 +1169,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       send(404, { error: "Not found." });
     } catch (e) {
       if (e instanceof HttpError) send(e.status, { error: e.message });
+      else if (e instanceof SignInUnavailable) send(503, { error: e.message });
       else { console.error(e); send(500, { error: "Something went wrong on the server." }); }
     }
     return true;
