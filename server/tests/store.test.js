@@ -112,7 +112,7 @@ test("logs are capped, dropping the oldest", (t) => {
 /* Supabase store, against an in-memory stand-in for the client */
 
 // missing: tables that haven't been created in the project
-function fakeSupabase({ tables = {}, failWrites = false, missing = [] } = {}) {
+function fakeSupabase({ tables = {}, failWrites = false, missing = [], missingColumns = [] } = {}) {
   const db = new Map(Object.entries(tables).map(([t, rows]) => [t, new Map(rows.map((r) => [r.id ?? r.uid ?? r.key, r]))]));
   const ops = [];
   const files = new Map();
@@ -121,11 +121,18 @@ function fakeSupabase({ tables = {}, failWrites = false, missing = [] } = {}) {
     from(name) {
       if (missing.includes(name)) {
         const error = { code: "42P01", message: `relation "public.${name}" does not exist` };
-        return { select: () => ({ order: () => ({ range: async () => ({ data: null, error }) }) }), upsert: async () => ({ error }), delete: () => ({ in: async () => ({ error }) }) };
+        return { select: () => ({ order: () => ({ range: async () => ({ data: null, error }) }), limit: async () => ({ data: null, error }) }), upsert: async () => ({ error }), delete: () => ({ in: async () => ({ error }) }) };
       }
       const rows = tableOf(name);
       return {
-        select: () => ({ order: () => ({ range: async (from, to) => ({ data: [...rows.values()].slice(from, to + 1), error: null }) }) }),
+        select: (cols) => ({
+          order: () => ({ range: async (from, to) => ({ data: [...rows.values()].slice(from, to + 1), error: null }) }),
+          // A column listed in missingColumns ("table.column") isn't there
+          limit: async () => {
+            const gone = String(cols || "").split(",").find((c) => missingColumns.includes(`${name}.${c}`));
+            return gone ? { data: null, error: { code: "42703", message: `column ${name}.${gone} does not exist` } } : { data: [], error: null };
+          },
+        }),
         upsert: async (list, { onConflict }) => {
           if (failWrites) return { error: { message: "network down" } };
           ops.push(["upsert", name, list.length]);
@@ -266,6 +273,11 @@ test("a project saved as JSON before the columns moves into them on the next sta
 test("a missing table stops the start with what to run", async (t) => {
   t.mock.method(console, "log", () => {});
   await assert.rejects(supa({ missing: ["settings"] }), /migrate-to-columns\.sql/);
+});
+
+test("a missing column stops the start instead of failing every save", async (t) => {
+  t.mock.method(console, "log", () => {});
+  await assert.rejects(supa({ missingColumns: ["orgs.disabled_at"] }), /"orgs" table .* missing a column .*add-columns\.sql/);
 });
 
 test("a failed write stays pending and goes through on the next flush", async (t) => {

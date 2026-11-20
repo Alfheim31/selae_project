@@ -133,6 +133,7 @@ create table if not exists orgs (
   "created_at" timestamptz,
   "created_by" text,
   "edited_at" timestamptz,
+  "disabled_at" timestamptz,
   seq bigserial,
   updated_at timestamptz not null default now());
 

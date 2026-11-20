@@ -122,7 +122,7 @@ export const TABLES = [
     cols: [
       ["name", "name", "text"], ["email", "email", "text"], ["type", "type", "text"], ["disabled", "disabled", "bool"],
       ["logo", "logo", "text"], ["cover", "cover", "text"], ["created_at", "createdAt", "time"], ["created_by", "createdBy", "text"],
-      ["edited_at", "updatedAt", "time"],
+      ["edited_at", "updatedAt", "time"], ["disabled_at", "disabledAt", "time"],
     ],
   },
   {

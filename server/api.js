@@ -410,6 +410,9 @@ function lanUrls(req) {
 
 /* ---------- notifications ---------- */
 const MAX_NOTICES = 2000;
+const DAY_MS = 86400000;
+// A deactivated organization is deleted this many days later
+export const DEACTIVATED_DAYS = 30;
 function addNotice(d, to, item) {
   d.notices = d.notices || [];
   d.notices.push({ id: newId(), to: String(to).toLowerCase(), time: new Date().toISOString(), ...item });
@@ -544,6 +547,33 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     const name = String(url || "").split("/").pop();
     if (UPLOAD_NAME.test(name)) store.removeUpload(name);
   };
+  /* A deactivated organization can't sign in or manage events, and is deleted, with its officers,
+     DEACTIVATED_DAYS after it was deactivated unless the superadmin reactivates it. Its events stay. */
+  const purgeDeactivated = (now = Date.now()) => {
+    const orgs = store.data.orgs || [];
+    // Deactivated before the countdown existed: the 30 days start now
+    if (orgs.some((o) => o.disabled && !o.disabledAt)) {
+      store.mutate(() => { for (const o of orgs) if (o.disabled && !o.disabledAt) o.disabledAt = new Date(now).toISOString(); });
+    }
+    const due = orgs.filter((o) => o.disabled && o.disabledAt && now - Date.parse(o.disabledAt) >= DEACTIVATED_DAYS * DAY_MS);
+    if (!due.length) return [];
+    const ids = new Set(due.map((o) => o.id));
+    store.mutate((d) => {
+      d.orgs = d.orgs.filter((o) => !ids.has(o.id));
+      d.orgMembers = (d.orgMembers || []).filter((m) => !ids.has(m.orgId));
+    });
+    for (const o of due) {
+      removeUpload(o.logo);
+      removeUpload(o.cover);
+      if (orgAccounts) orgAccounts.release({ email: o.email, orgId: o.id }).catch((e) => console.error("SELAE: couldn't release a deleted org's account.", e.message));
+      console.log(`SELAE: deleted ${o.name}, deactivated ${DEACTIVATED_DAYS} days ago.`);
+    }
+    return [...ids];
+  };
+  const purgeLater = () => { try { purgeDeactivated(); } catch (e) { console.error("SELAE: couldn't delete deactivated organizations.", e.message); } };
+  setTimeout(purgeLater, 1000).unref();
+  setInterval(purgeLater, 3600e3).unref();
+
   const requireUser = (req) => req.user || fail(401, "Sign in first.");
   const requireSuperadmin = (req) => {
     const user = requireUser(req);
@@ -774,7 +804,12 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       }
       store.mutate(() => {
         Object.assign(org, fields, { updatedAt: new Date().toISOString() });
-        if (typeof b.disabled === "boolean") org.disabled = b.disabled;
+        if (typeof b.disabled === "boolean" && b.disabled !== Boolean(org.disabled)) {
+          org.disabled = b.disabled;
+          // The countdown to deletion starts on deactivating and stops on reactivating
+          if (b.disabled) org.disabledAt = new Date().toISOString();
+          else delete org.disabledAt;
+        }
       });
       return { org, credentials };
     }],
@@ -1027,7 +1062,10 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
     }],
   ];
 
-  return async function handle(req, res, next) {
+  // The tests run the deletion of deactivated organizations themselves, at a time they choose
+  handle.purgeDeactivated = purgeDeactivated;
+  return handle;
+  async function handle(req, res, next) {
     const url = new URL(req.url, "http://x");
     const upload = url.pathname.match(/^\/uploads\/([^/]+)$/);
     if (upload && req.method === "GET") {

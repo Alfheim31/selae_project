@@ -71,7 +71,7 @@ function setup(t, { venueLaptop = true } = {}) {
     });
     return call("POST", `/api/events/${id}/register`, {}, { ...opts, headers: { ...opts.headers, authorization: `Bearer ${uid}` } });
   };
-  return { store, call, event, register, sent };
+  return { store, call, event, register, sent, handle };
 }
 
 const regOf = (store, id, studentId) => store.data.registrations.find((r) => r.eventId === id && r.studentId === studentId);
@@ -440,6 +440,39 @@ test("only the superadmin adds, edits, and disables organizations", async (t) =>
   assert.equal((await me("ben@gmail.com")).role, "org");
   assert.equal((await me("org@gmail.com")).role, "student");
   assert.ok((await call("GET", "/api/admin/orgs", null, as("boss@gmail.com"))).json.orgs.some((o) => o.id === id && o.email === "ben@gmail.com"));
+});
+
+test("a deactivated organization is deleted 30 days later with its officers, unless it's reactivated first", async (t) => {
+  const { call, store, handle } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const DAY = 86400000;
+  const made = await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"));
+  const id = made.json.org.id;
+  await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("org@gmail.com"));
+  const ev = await call("POST", "/api/events", { title: "Kept", venue: "Hall", capacity: 10, startsAt: future(48), endsAt: future(50) }, as("org@gmail.com"));
+  assert.equal(ev.status, 200);
+
+  // Deactivating starts the countdown; reactivating stops it
+  const off = await call("PATCH", `/api/admin/orgs/${id}`, { disabled: true }, as("boss@gmail.com"));
+  assert.ok(Date.parse(off.json.org.disabledAt) > 0);
+  const on = await call("PATCH", `/api/admin/orgs/${id}`, { disabled: false }, as("boss@gmail.com"));
+  assert.equal(on.json.org.disabledAt, undefined);
+  assert.deepEqual(handle.purgeDeactivated(Date.now() + 40 * DAY), []);
+
+  // Deactivated again: still there on day 29, gone on day 30, its officers too; its event stays
+  await call("PATCH", `/api/admin/orgs/${id}`, { disabled: true }, as("boss@gmail.com"));
+  assert.deepEqual(handle.purgeDeactivated(Date.now() + 29 * DAY), []);
+  assert.ok(store.data.orgs.some((o) => o.id === id));
+  assert.deepEqual(handle.purgeDeactivated(Date.now() + 30 * DAY + 1000), [id]);
+  assert.equal(store.data.orgs.some((o) => o.id === id), false);
+  assert.equal(store.data.orgMembers.some((m) => m.orgId === id), false);
+  assert.ok(store.data.events.some((e) => e.id === ev.json.event.id));
+  assert.equal((await call("GET", "/api/admin/orgs", null, as("boss@gmail.com"))).json.orgs.some((o) => o.id === id), false);
+
+  // An org deactivated before the countdown existed gets its 30 days from now
+  store.mutate((d) => { d.orgs.push({ id: "old", name: "Old Org", email: "old@gmail.com", disabled: true }); });
+  assert.deepEqual(handle.purgeDeactivated(), []);
+  assert.ok(Date.parse(store.data.orgs.find((o) => o.id === "old").disabledAt) > 0);
 });
 
 test("an org invites a student as officer, the student accepts, and the org can remove them", async (t) => {

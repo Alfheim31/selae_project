@@ -152,6 +152,7 @@ create table if not exists orgs (
   "created_at" timestamptz,
   "created_by" text,
   "edited_at" timestamptz,
+  "disabled_at" timestamptz,
   seq bigserial,
   updated_at timestamptz not null default now());
 
@@ -293,7 +294,8 @@ alter table orgs
   add column if not exists "cover" text,
   add column if not exists "created_at" timestamptz,
   add column if not exists "created_by" text,
-  add column if not exists "edited_at" timestamptz;
+  add column if not exists "edited_at" timestamptz,
+  add column if not exists "disabled_at" timestamptz;
 
 alter table org_members
   add column if not exists "org_id" text,

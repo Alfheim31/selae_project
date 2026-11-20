@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { COLORS, skyOf } from "../../components/shared.jsx";
 import { ErrorBox, Sk } from "../../components/ui.jsx";
+import { askConfirm } from "../../components/ConfirmDialog.jsx";
 import { api } from "../../lib/api.js";
 
 /* Superadmin: add, filter, edit, and disable organizations */
@@ -17,6 +18,13 @@ export const ORG_TYPES = [
   ["nonacademic", "Non-academic org"],
   ["religious", "Religious org"],
 ];
+// Matches the server: a deactivated organization is deleted this many days later
+const DEACTIVATED_DAYS = 30;
+const deletionNote = (disabledAt) => {
+  if (!disabledAt) return `Deleted ${DEACTIVATED_DAYS} days after deactivating unless reactivated`;
+  const left = Math.ceil((Date.parse(disabledAt) + DEACTIVATED_DAYS * 86400000 - Date.now()) / 86400000);
+  return left > 1 ? `Deleted in ${left} days unless reactivated` : left === 1 ? "Deleted tomorrow unless reactivated" : "Being deleted";
+};
 const typeLabel = (t) => (ORG_TYPES.find(([k]) => k === t) || [null, "Uncategorized"])[1];
 const FILTERS = [["all", "All"], ["council", "Council"], ["academic", "Academic"], ["nonacademic", "Non-academic"], ["religious", "Religious"]];
 
@@ -37,6 +45,13 @@ const ORGS_CSS = `
 .orgstat{display:flex;align-items:center;gap:.8rem;padding:1rem 1.1rem}
 .orgstat .ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .orgstat .n{font-family:var(--f-display);font-weight:700;font-size:1.9rem;line-height:1}
+.orgstat > div{min-width:0}
+/* Phones: two stats to a row, so the icon goes above the number to leave the label the full width */
+@media (max-width:640px){
+  .orgstat{flex-direction:column;align-items:flex-start;gap:.55rem;padding:.85rem .9rem}
+  .orgstat .ic{width:34px;height:34px;border-radius:10px}
+  .orgstat .n{font-size:1.6rem}
+}
 .orggrid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
 .orgcard{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden;
   box-shadow:var(--shadow);transition:transform .15s ease,box-shadow .15s ease}
@@ -46,6 +61,12 @@ const ORGS_CSS = `
 .orgav{position:relative;z-index:1;width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;border:4px solid var(--surface);overflow:hidden;
   background-size:cover;background-position:center;
   font-family:var(--f-display);font-weight:700;font-size:1.5rem;text-shadow:0 1px 6px rgba(20,27,58,.35);box-shadow:0 6px 16px -8px rgba(20,27,58,.45)}
+/* Edit · Reset password · Deactivate: three equal parts, icon above its label, so every label fits */
+.orgacts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line)}
+.orgacts .btn{border-radius:0;min-width:0;flex-direction:column;gap:.25rem;padding:.55rem .3rem;font-size:.8rem;letter-spacing:.02em;
+  white-space:normal;text-align:center;line-height:1.15}
+.orgacts .btn + .btn{border-left:1px solid var(--line)}
+.orgacts .btn svg{flex-shrink:0}
 .orgmeta{display:flex;flex-wrap:wrap;justify-content:center;gap:.25rem .9rem}
 .orgmeta span{display:inline-flex;align-items:center;gap:.3rem}
 .orgchips{display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center}
@@ -91,7 +112,7 @@ export function OrgsPanel() {
   const stats = [
     ["Organizations", all.length, Building2, "var(--accent-soft)", "var(--accent)"],
     ["Active", active, CheckCircle2, "#E2F4EA", "#14794B"],
-    ["Disabled", all.length - active, Ban, "var(--raised)", "var(--muted)"],
+    ["Deactivated", all.length - active, Ban, "var(--raised)", "var(--muted)"],
     ["Upcoming events", upcoming, CalendarDays, "#FDF0DE", "#9A5A0B"],
   ];
 
@@ -271,7 +292,7 @@ function NewOrg({ onAdded, onClose }) {
             </select>
           </label>
           {error && <ErrorBox message={error} />}
-          <div className="flex justify-end gap-2" style={{ marginTop: 4 }}>
+          <div className="flex flex-wrap justify-end gap-2" style={{ marginTop: 4 }}>
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="btn btn-primary" type="submit" disabled={busy || !name.trim() || !email.trim() || !type}>
               <Plus size={17} /> {busy ? "Adding…" : "Add organization"}
@@ -301,21 +322,31 @@ function OrgCard({ org, onChange, onCredentials }) {
     } catch (err) { setError(err.message); }
     setBusy(false);
   };
-  const toggle = () => {
-    const msg = org.disabled
-      ? `Enable ${org.name}? Its account can sign in and manage events again.`
-      : `Disable ${org.name}? Its account and officers lose access until you enable it again. Its events stay.`;
-    if (confirm(msg)) save({ disabled: !org.disabled });
+  const toggle = async () => {
+    const ok = await askConfirm(org.disabled
+      ? { title: `Reactivate ${org.name}?`, confirm: "Reactivate",
+          message: "Its account and officers can sign in and manage events again, and it won't be deleted." }
+      : { title: `Deactivate ${org.name}?`, confirm: "Deactivate", danger: true,
+          message: `Its account and officers lose access right away. If you don't reactivate it within ${DEACTIVATED_DAYS} days, `
+            + "the organization and its officer list are deleted for good. Its events stay." });
+    if (ok) save({ disabled: !org.disabled });
   };
   const resend = async () => {
-    if (!confirm(`Send ${org.name} a new temporary password? Their current password stops working.`)) return;
+    const ok = await askConfirm({ title: `Reset ${org.name}'s password?`, confirm: "Send new password", danger: true,
+      message: `For when the organization lost or forgot its password. SELAE emails a new temporary password to ${org.email}, `
+        + "and the current password stops working. They choose their own password the next time they sign in." });
+    if (!ok) return;
     setBusy(true); setError("");
     try { onCredentials((await api.resendOrgPassword(org.id)).credentials); } catch (err) { setError(err.message); }
     setBusy(false);
   };
-  const submitEdit = (e) => {
+  const submitEdit = async (e) => {
     e.preventDefault();
-    if (email.trim().toLowerCase() !== org.email && !confirm(`Move ${org.name} to ${email.trim()}? That email gets a new temporary password, and ${org.email} can't sign in as the organization anymore.`)) return;
+    if (email.trim().toLowerCase() !== org.email) {
+      const ok = await askConfirm({ title: `Move ${org.name} to a new email?`, confirm: "Move and send password", danger: true,
+        message: `${email.trim()} gets a new temporary password, and ${org.email} can't sign in as the organization anymore.` });
+      if (!ok) return;
+    }
     save({ name, email, ...(type ? { type } : {}) });
   };
   const cancel = () => { setEditing(false); setName(org.name); setEmail(org.email); setType(org.type || ""); setError(""); };
@@ -350,20 +381,26 @@ function OrgCard({ org, onChange, onCredentials }) {
             <div style={{ fontWeight: 700, fontSize: "1.08rem", marginTop: 4, color: org.disabled ? "var(--muted)" : "var(--text)" }}>{org.name}</div>
             <div className="muted text-sm" style={{ overflowWrap: "anywhere" }}>{org.email}</div>
             <span className="pill" style={org.disabled ? { background: "var(--raised)", color: "var(--muted)" } : { background: "#E2F4EA", color: "#14794B" }}>
-              {org.disabled ? "Disabled" : "Active"}
+              {org.disabled ? "Deactivated" : "Active"}
             </span>
+            {org.disabled && (
+              <div className="text-xs" style={{ color: "var(--bad)" }} title={org.disabledAt ? `Deactivated ${new Date(org.disabledAt).toLocaleDateString()}` : undefined}>
+                {deletionNote(org.disabledAt)}
+              </div>
+            )}
             <div className="orgmeta tag" style={{ marginTop: 4 }}>
               <span><CalendarDays size={12} /> {org.events || 0} event{org.events === 1 ? "" : "s"}{org.upcoming ? ` · ${org.upcoming} upcoming` : ""}</span>
               <span><Users size={12} /> {org.officers || 0} officer{org.officers === 1 ? "" : "s"}</span>
             </div>
             {error && <div style={{ width: "100%", textAlign: "left" }}><ErrorBox message={error} /></div>}
           </div>
-          <div className="grid grid-cols-3" style={{ borderTop: "1px solid var(--line)" }}>
-            <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0 }} onClick={() => setEditing(true)} disabled={busy}><Pencil size={14} /> Edit</button>
-            <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0, borderLeft: "1px solid var(--line)", borderRight: "1px solid var(--line)" }}
-              onClick={resend} disabled={busy || org.disabled} title="Email a new temporary password"><KeyRound size={14} /> Password</button>
-            <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0, color: org.disabled ? "var(--ok)" : "var(--bad)" }} onClick={toggle} disabled={busy}>
-              <Power size={14} /> {org.disabled ? "Enable" : "Disable"}
+          <div className="orgacts">
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)} disabled={busy}><Pencil size={14} /><span>Edit</span></button>
+            <button className="btn btn-ghost btn-sm" onClick={resend} disabled={busy || org.disabled} title="Email the organization a new temporary password">
+              <KeyRound size={14} /><span>Reset password</span>
+            </button>
+            <button className="btn btn-ghost btn-sm" style={{ color: org.disabled ? "var(--ok)" : "var(--bad)" }} onClick={toggle} disabled={busy}>
+              <Power size={14} /><span>{org.disabled ? "Reactivate" : "Deactivate"}</span>
             </button>
           </div>
         </>

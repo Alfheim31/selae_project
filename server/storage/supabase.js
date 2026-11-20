@@ -54,6 +54,13 @@ export async function openSupabaseStore({ url, key, client = createClient(url, k
     const rows = await readAll(client, spec.table);
     if (rows === null) throw explain({ code: "42P01", message: `relation "public.${spec.table}" does not exist` }, `read ${spec.table}`);
     byTable.set(spec.table, rows);
+    // Every column the server writes has to be there, or each save would fail while the app kept running
+    const cols = [spec.key, ...spec.cols.map(([c]) => c), ...(spec.kind === "child" ? [spec.parentCol] : [])];
+    const probe = await client.from(spec.table).select(cols.join(",")).limit(1);
+    if (probe.error) {
+      throw new Error(`SELAE's "${spec.table}" table in Supabase is missing a column (${probe.error.message}). `
+        + "Run server/storage/add-columns.sql in the SQL editor, then start again.");
+    }
   }
   const stateRows = (await readAll(client, LEGACY_STATE)) || [];
 
