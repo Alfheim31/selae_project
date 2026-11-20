@@ -119,6 +119,12 @@ export async function confirmSignOut() {
   return ok;
 }
 
+// A new token for this session, when the server turned the current one away
+export async function refreshSession() {
+  if (!supabase) return;
+  try { await supabase.auth.refreshSession(); } catch { /* the next request says what's wrong */ }
+}
+
 export async function accessToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
-import { useSession } from "./auth.js";
+import { refreshSession, signOut, useSession } from "./auth.js";
 
 // One copy of /api/me for the whole page, so the top bar and the page don't each fetch it
 let current = { uid: undefined, me: undefined };
@@ -10,20 +10,33 @@ const publish = (uid, me) => {
   current = { uid, me };
   for (const l of listeners) l(me);
 };
-// A server that is waking up (Render's free tier sleeps) can take a minute to answer. Until it does, the
-// account stays "loading" instead of looking signed out, which hid Events and showed the sign-in form.
+// A server that is waking up (Render's free tier sleeps) can take a minute or more to answer, and Supabase
+// can be briefly unreachable. Until the server answers, the account stays "loading" instead of looking
+// signed out, which showed the sign-in form to people who were signed in. It keeps asking, every 8 seconds
+// at most, for as long as this account is the one signed in.
+// If the browser has a session but the server says nobody is signed in, the token it sent was stale: get
+// a fresh one and ask again. After a few such answers the session really is dead, so it's ended here too,
+// and the page shows signed out everywhere (never a name in the top bar over a sign-in form).
 async function fetchMe(uid) {
-  for (let attempt = 1; attempt <= 12; attempt++) {
+  let refused = 0;
+  for (let attempt = 1; ; attempt++) {
     try {
       const me = (await api.me()).user;
+      if (!me && uid) {
+        refused++;
+        if (refused >= 3) { await signOut(); return; }
+        await refreshSession();
+        if (current.uid !== uid) return;
+        continue;
+      }
       publish(uid, me);
       return;
     } catch {
       if (current.uid !== uid) return;
       await new Promise((r) => setTimeout(r, Math.min(2000 * attempt, 8000)));
+      if (current.uid !== uid) return;
     }
   }
-  publish(uid, null);
 }
 
 // The signed-in account as SELAE sees it (role, profile). undefined while loading, null when signed out.

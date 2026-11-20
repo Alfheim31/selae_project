@@ -18,8 +18,11 @@ function signInMethods(token) {
 export function supabaseVerifier({ url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_KEY } = {}) {
   if (!url || !key) return null;
   return async (token) => {
-    const res = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${token}` } });
-    if (!res.ok) return null;
+    const res = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+    // 401/403: the token is bad or expired, so nobody is signed in. Anything else (Supabase busy or down)
+    // says nothing about the token, so it's an error, not "signed out".
+    if (res.status === 401 || res.status === 403) return null;
+    if (!res.ok) throw new Error(`Supabase answered ${res.status}`);
     const u = await res.json();
     if (!u || !u.id || !u.email) return null;
     const meta = u.user_metadata || {};
@@ -27,6 +30,11 @@ export function supabaseVerifier({ url = process.env.SUPABASE_URL, key = process
     return { id: u.id, email: u.email.toLowerCase(), name: meta.full_name || meta.name || "", avatar: meta.avatar_url || null,
       viaGoogle: signInMethods(token).includes("oauth"), orgId: app.selae_org || null, tempPassword: Boolean(app.selae_temp_password) };
   };
+}
+
+// Thrown when Supabase can't say whose token this is right now
+export class SignInUnavailable extends Error {
+  constructor() { super("Signing in can't be checked right now. Try again in a moment."); }
 }
 
 export const emailList = (raw) => String(raw || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -46,7 +54,11 @@ export function createAuth(verify) {
     const hit = cache.get(token);
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.user;
     let user = null;
-    try { user = await verify(token); } catch (e) { console.error("SELAE: couldn't check the login token.", e.message); return null; }
+    try { user = await verify(token); } catch (e) {
+      // Not cached, and not treated as signed out: the request fails with 503 and the app asks again
+      console.error("SELAE: couldn't check the login token.", e.message);
+      throw new SignInUnavailable();
+    }
     if (cache.size > CACHE_MAX) cache.clear();
     cache.set(token, { user, at: Date.now() });
     return user;
