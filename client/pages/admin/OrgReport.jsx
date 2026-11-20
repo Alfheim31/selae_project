@@ -16,6 +16,13 @@ const TOP = 10;
 const short = (name, n = 22) => (name.length > n ? `${name.slice(0, n - 1)}…` : name);
 
 const CSS = `
+.rep-find{border:1px solid var(--line);border-radius:16px;background:var(--surface);overflow:hidden}
+.rep-find-h{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;background:linear-gradient(90deg,var(--accent-soft),transparent);border-bottom:1px solid var(--line)}
+.rep-find-h .ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--accent);color:#fff}
+.rep-find ol{list-style:none;margin:0;padding:.35rem 1rem}
+.rep-find li{display:flex;align-items:flex-start;gap:.7rem;padding:.55rem 0;font-size:.92rem;line-height:1.45}
+.rep-find li + li{border-top:1px dashed var(--line)}
+.rep-find .no{width:22px;height:22px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:.78rem;margin-top:1px}
 .rep-more{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.25rem .75rem;text-align:center}
 .rep-all{display:flex;margin:.5rem auto 0}
 .dl-card{max-width:360px;width:100%;display:flex;flex-direction:column;align-items:center;text-align:center;gap:.6rem;padding:2rem 1.6rem 1.6rem;border-radius:24px}
@@ -221,12 +228,20 @@ export function OrgReport() {
       </div>
 
       {summary && summary.conclusions.length > 0 && (
-        <div className="flex gap-3" style={{ padding: ".9rem 1rem", borderRadius: 14, background: "var(--accent-soft)" }}>
-          <Lightbulb size={19} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 2 }} />
-          <ul className="flex flex-col gap-1 text-sm" style={{ margin: 0, paddingLeft: "1rem", listStyle: "disc" }}>
-            {summary.conclusions.map((c) => <li key={c}>{c}</li>)}
-          </ul>
-        </div>
+        <section className="rep-find" aria-labelledby="rep-find-h">
+          <div className="rep-find-h">
+            <span className="ic"><Lightbulb size={18} /></span>
+            <div className="min-w-0">
+              <div id="rep-find-h" style={{ fontWeight: 700, lineHeight: 1.2 }}>Key findings</div>
+              <div className="muted text-xs">{periodLabel(report.from, report.to)}</div>
+            </div>
+          </div>
+          <ol>
+            {summary.conclusions.map((c, i) => (
+              <li key={c}>{summary.conclusions.length > 1 && <span className="no">{i + 1}</span>}<span>{c}</span></li>
+            ))}
+          </ol>
+        </section>
       )}
 
       {summary && active.length > 0 && (
