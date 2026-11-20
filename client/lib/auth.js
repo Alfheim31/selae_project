@@ -55,6 +55,20 @@ export const passwordReset = {
   clear() { try { sessionStorage.removeItem(RESET); } catch { /* private mode */ } },
 };
 
+// How this session signed in, newest first ("oauth" for Google, "otp"/"recovery" for a code, "password")
+function signInMethods(session) {
+  try {
+    const part = session.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const amr = JSON.parse(atob(part)).amr || [];
+    return [...amr].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)).map((a) => a.method);
+  } catch { return []; }
+}
+// Someone who started a password reset in this tab but then signed in with Google instead
+// isn't asked for a new password
+function forgetResetAfterGoogle(session) {
+  if (session && passwordReset.get() && signInMethods(session)[0] === "oauth") passwordReset.clear();
+}
+
 // A correct code signs the person in; the new password is chosen on the next page
 export async function verifyResetCode(email, code) {
   passwordReset.set();
@@ -102,12 +116,14 @@ export function useSession() {
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => {
+      forgetResetAfterGoogle(data.session);
       setSession(data.session);
       // Drop ?code= from the address bar after login
       if (window.location.search) window.history.replaceState(null, "", window.location.pathname + window.location.hash);
     });
     const { data } = supabase.auth.onAuthStateChange((event, s) => {
       if (event === "PASSWORD_RECOVERY") passwordReset.set();
+      else forgetResetAfterGoogle(s);
       setSession(s);
     });
     return () => data.subscription.unsubscribe();
