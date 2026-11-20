@@ -516,7 +516,7 @@ export function Toaster() {
 }
 
 /* Image resize before upload */
-export async function prepareImage(file, { max = 1800, quality = 0.84 } = {}) {
+export async function prepareImage(file, { max = 1600, quality = 0.8 } = {}) {
   if (!file || !/^image\//.test(file.type)) throw new Error("Choose an image file (JPEG, PNG or WebP).");
   let source;
   try {
@@ -539,7 +539,11 @@ export async function prepareImage(file, { max = 1800, quality = 0.84 } = {}) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   if (source.close) source.close();
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  // WebP is about a third smaller than JPEG at the same look, so storage lasts longer. Browsers that
+  // can't make WebP (they hand back a PNG instead) get JPEG.
+  const encode = (type) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  let blob = await encode("image/webp");
+  if (!blob || blob.type !== "image/webp") blob = await encode("image/jpeg");
   if (!blob) throw new Error("This image couldn't be prepared for upload.");
   return blob;
 }
