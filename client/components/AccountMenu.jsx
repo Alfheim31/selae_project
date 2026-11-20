@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, LogIn, LogOut, UserRound } from "lucide-react";
 import { displayName, ROLE_LABEL } from "../lib/account.js";
-import { signOut } from "../lib/auth.js";
+import { confirmSignOut } from "../lib/auth.js";
 import { go } from "./shared.jsx";
 
 export function AccountMenu({ account }) {
@@ -29,7 +29,7 @@ export function AccountMenu({ account }) {
   const meta = session.user.user_metadata || {};
   const name = displayName(me, session);
   const pick = (to) => { setOpen(false); go(to); };
-  const out = async () => { setOpen(false); await signOut(); go(""); };
+  const out = async () => { setOpen(false); if (await confirmSignOut()) go(""); };
 
   return (
     <div className="relative" ref={box}>

@@ -3,7 +3,7 @@ import { Check, Eye, EyeOff, KeyRound, LogOut } from "lucide-react";
 import { go, Mark, toast } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
 import { api } from "../../lib/api.js";
-import { passwordReset, signOut } from "../../lib/auth.js";
+import { confirmSignOut, passwordReset } from "../../lib/auth.js";
 
 const RULES = [
   ["At least 8 characters", (p) => p.length >= 8],
@@ -33,7 +33,7 @@ export function ChangePasswordPage({ me, onDone, reset = false }) {
       go("", { replace: true });
     } catch (err) { setError(err.message); setBusy(false); }
   };
-  const leave = async () => { await signOut(); go(""); };
+  const leave = async () => { if (await confirmSignOut()) go(""); };
 
   return (
     <div className="wrap py-12" style={{ maxWidth: 480 }}>

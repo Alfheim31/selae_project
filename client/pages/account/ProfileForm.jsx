@@ -5,7 +5,7 @@ import { formatName, go, tidyInitial, tidyName, toast } from "../../components/s
 import { ErrorBox } from "../../components/ui.jsx";
 import { pendingStudent } from "../../lib/account.js";
 import { api } from "../../lib/api.js";
-import { signOut } from "../../lib/auth.js";
+import { confirmSignOut } from "../../lib/auth.js";
 
 const STUDENT_ID = /^(\d{4})\s*-?\s*(\d{5})$/;
 
@@ -74,12 +74,12 @@ export function ProfileForm({ me, onSaved, required = false }) {
           <strong>This student number already has an account.</strong> If it's yours, sign out and sign in to that account.
           If it isn't, check the number, or ask an organizer for help.
           <div style={{ marginTop: 8 }}>
-            <button type="button" className="btn btn-sm" onClick={async () => { await signOut(); go(""); }}>Sign out</button>
+            <button type="button" className="btn btn-sm" onClick={async () => { if (await confirmSignOut()) go(""); }}>Sign out</button>
           </div>
         </div>
       ) : (
         <FaceCapture value={faceDescriptor} onChange={setFaceDescriptor} onError={setError} saved={Boolean(p && p.hasFace)}
-          consent={consent} onConsent={setConsent} onSignOut={async () => { await signOut(); go(""); }} />
+          consent={consent} onConsent={setConsent} onSignOut={async () => { if (await confirmSignOut()) go(""); }} />
       )}
 
       {preview && <p className="text-sm muted">Guest lists will show you as <strong style={{ color: "var(--text)" }}>{preview}</strong></p>}

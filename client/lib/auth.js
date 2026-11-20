@@ -1,6 +1,8 @@
 /* Google sign-in through Supabase Auth */
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { LogOut } from "lucide-react";
+import { askConfirm } from "../components/ConfirmDialog.jsx";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -102,6 +104,19 @@ export async function passwordSignUp(email, password) {
 export async function signOut() {
   passwordReset.clear();
   if (supabase) await supabase.auth.signOut();
+}
+
+// What a Sign out button calls: asks first, in the app's own pop-up. True when the person signed out.
+export async function confirmSignOut() {
+  const ok = await askConfirm({
+    title: "Sign out?",
+    message: "You'll need to sign in again to use your account on this device.",
+    confirm: "Sign out",
+    cancel: "Stay signed in",
+    icon: LogOut,
+  });
+  if (ok) await signOut();
+  return ok;
 }
 
 export async function accessToken() {
