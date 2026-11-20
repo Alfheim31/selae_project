@@ -7,6 +7,9 @@ import { euclideanDistance, extractFaceDescriptor } from "../../lib/face.js";
 import { digitsApart, readStudentNumber } from "../../lib/ocr.js";
 import { ResultPanel } from "./ScanResult.jsx";
 
+// Scanning stops after this long without finding a face or ID, so the camera isn't left reading an empty gate
+const SCAN_TIMEOUT = 60000;
+
 /* ---------------- gate scanner ---------------- */
 function makeActions(data) {
   return {
@@ -181,9 +184,12 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const [pendingFaceMatch, setPendingFaceMatch] = useState(null);
   const [scan, setScan] = useState({ kind: "loading", reads: 0 });
   const [loopKey, setLoopKey] = useState(0);
+  // After a minute with no face or ID found, scanning stops until staff press "Scan again"
+  const [paused, setPaused] = useState(false);
 
   const reset = (clearCooldown = true) => {
     clearTimers();
+    setPaused(false);
     scanToken.current++;
     setPhase("idle");
     setResult(null);
@@ -210,6 +216,9 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
     let recentOcr = [];
     let recentFace = null;
     setScan({ kind: "loading", reads: 0 });
+    // A new loop (another mode, or the camera coming back) starts unpaused
+    setPaused(false);
+    if (idleRef.current) cam.resume();
 
     const tick = async () => {
       if (stopped) return;
@@ -320,6 +329,12 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
           }
         }
 
+        // A minute with nothing found (or a reader that took that long to start): stop and wait for staff
+        if (!matchedThisTick && Date.now() - lastFound > SCAN_TIMEOUT && idleRef.current) {
+          setPaused(true);
+          cam.freeze();
+          return;
+        }
         if (!matchedThisTick && now - lastFound > 2000) {
           setScan({ kind: now - lastFound > 15000 ? "struggling" : "scanning", reads });
         } else if (!matchedThisTick) {
@@ -441,6 +456,16 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                   </div>
                 )}
                 {phase === "result" && <div className="vf-note">Frame held</div>}
+                {paused && phase === "idle" && (
+                  <div role="status" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center",
+                    justifyContent: "center", gap: 12, padding: 16, textAlign: "center", background: "rgba(20,27,58,.72)", color: "#fff", zIndex: 3 }}>
+                    <strong style={{ fontSize: "1.1rem" }}>Scanning paused</strong>
+                    <span className="text-sm" style={{ maxWidth: 320 }}>
+                      No {scanMode === "face" ? "face" : scanMode === "ocr" ? "ID" : "face or ID"} was found for a minute. Press Scan again when the next attendee is ready.
+                    </span>
+                    <button type="button" className="btn btn-primary" onClick={() => reset()} autoFocus>Scan again</button>
+                  </div>
+                )}
               </>
             ) : cameraOn && cam.state !== "starting" ? (
               <>

@@ -3,6 +3,16 @@ import { Camera, CheckCircle2, ShieldCheck, Upload } from "lucide-react";
 import { extractFaceDescriptor } from "../lib/face.js";
 import { useCamera } from "./camera.jsx";
 
+// A scan (the first one also downloads the 94 MB face model) gives up after a minute so the student can try again.
+// The download keeps going in the background, so the next try usually finishes sooner.
+const SCAN_TIMEOUT = 60000;
+const TOO_LONG = "Scanning took more than a minute. On a slow connection the first scan takes longer while the face model downloads. Try again.";
+function withTimeout(promise) {
+  let t;
+  const late = new Promise((_, reject) => { t = setTimeout(() => reject(Object.assign(new Error(TOO_LONG), { timeout: true })), SCAN_TIMEOUT); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(t));
+}
+
 // Shown before any face scan, under the Data Privacy Act of 2012 (RA 10173)
 export function PrivacyNotice() {
   return (
@@ -33,12 +43,18 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
   const cam = useCamera(camOpen, camId);
   const fileInputRef = useRef(null);
 
+  // Each try gets a number; a scan that finishes after it timed out (or after a newer try) is ignored
+  const attempt = useRef(0);
+
   const captureFromVideo = async () => {
     if (!cam.videoRef.current) return;
+    const mine = ++attempt.current;
     setScanningFace(true);
     onError("");
+    setFaceStatus("Scanning… the first scan can take a while.");
     try {
-      const res = await extractFaceDescriptor(cam.videoRef.current);
+      const res = await withTimeout(extractFaceDescriptor(cam.videoRef.current));
+      if (mine !== attempt.current) return;
       if (!res) {
         setFaceStatus("No face detected. Center your face in good lighting and try again.");
       } else {
@@ -47,13 +63,16 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         setCamOpen(false);
       }
     } catch (err) {
-      onError("Failed to process face: " + err.message);
+      if (mine !== attempt.current) return;
+      if (err.timeout) setFaceStatus(TOO_LONG);
+      else onError("Failed to process face: " + err.message);
     }
     setScanningFace(false);
   };
 
   const captureFromFile = async (file) => {
     if (!file) return;
+    const mine = ++attempt.current;
     setScanningFace(true);
     onError("");
     setFaceStatus("Analyzing photo…");
@@ -64,8 +83,8 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         el.onerror = () => reject(new Error("Could not read image."));
         el.src = URL.createObjectURL(file);
       });
-      const res = await extractFaceDescriptor(img);
-      URL.revokeObjectURL(img.src);
+      const res = await withTimeout(extractFaceDescriptor(img)).finally(() => URL.revokeObjectURL(img.src));
+      if (mine !== attempt.current) return;
       if (!res) {
         setFaceStatus("Couldn't detect a clear face in that photo. Try another selfie.");
       } else {
@@ -73,7 +92,9 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
       }
     } catch (err) {
-      onError("Failed to process photo: " + err.message);
+      if (mine !== attempt.current) return;
+      if (err.timeout) setFaceStatus(TOO_LONG);
+      else onError("Failed to process photo: " + err.message);
     }
     setScanningFace(false);
   };
