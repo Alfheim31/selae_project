@@ -47,9 +47,10 @@ export const seen = {
 async function upload(path, blob) {
   const keys = Object.values(hostKeys.all());
   const headers = { "Content-Type": blob.type || "image/jpeg" };
-  if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
   const token = await accessToken();
+  // Signed in, the account decides what can be managed; host keys only count when nobody is signed in
   if (token) headers.Authorization = `Bearer ${token}`;
+  else if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
   let res;
   try { res = await fetch(path, { method: "POST", headers, body: blob }); } catch {
     throw new Error("Can't reach the SELAE server to upload. Check the Wi-Fi and try again.");
@@ -64,9 +65,10 @@ async function request(method, path, body) {
   const keys = Object.values(hostKeys.all());
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
   const token = await accessToken();
+  // Signed in, the account decides what can be managed; host keys only count when nobody is signed in
   if (token) headers.Authorization = `Bearer ${token}`;
+  else if (keys.length) headers["X-Selae-Host-Key"] = keys.join(",");
   let res;
   try {
     res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -96,8 +98,9 @@ export const api = {
   events: () => request("GET", "/api/events"),
   event: (id) => request("GET", `/api/events/${id}`),
   async create(fields) {
+    // Events are made by an organization or its officers, who manage them through their accounts,
+    // so the event's host key isn't kept in this browser for whoever signs in next
     const out = await request("POST", "/api/events", fields);
-    hostKeys.add(out.event.id, out.hostKey);
     return out.event;
   },
   update: (id, fields) => request("PATCH", `/api/events/${id}`, fields),

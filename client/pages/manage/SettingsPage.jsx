@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
 import { EventForm } from "../../components/EventForm.jsx";
 import { QrCode } from "../../components/shared.jsx";
-import { api, hostKeys } from "../../lib/api.js";
+import { api } from "../../lib/api.js";
 
 /* ---------------- share / invite ---------------- */
 function useShareBase() {
@@ -56,20 +56,11 @@ export function ShareCard({ eventId }) {
 }
 
 export function SettingsPage({ data, eventId, refresh }) {
-  const key = hostKeys.all()[eventId];
-  const { base } = useShareBase();
+  // No co-host link: managing an event comes from the account (the organization or its officers),
+  // so organizers who need the dashboard or scanner are invited as officers instead
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 860 }}>
       <ShareCard eventId={eventId} />
-      {key && (
-        <section className="panel p-5 flex flex-col gap-3">
-          <div>
-            <h2 className="font-bold text-lg">Co-host link</h2>
-            <p className="muted text-sm">Anyone who opens this can run the dashboard and gate scanner for this event. Share it only with your organizers.</p>
-          </div>
-          <CopyRow value={`${base}/#/host/${eventId}/${key}`} />
-        </section>
-      )}
       <section className="panel p-5 flex flex-col gap-4">
         <h2 className="font-bold text-lg">Event details</h2>
         <EventForm key={data.event.id} initial={data.event} submitLabel="Save changes" showRegistrationToggle eventId={eventId} onCoverChange={refresh}

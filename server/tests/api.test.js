@@ -544,6 +544,13 @@ test("localhost is no one special unless venue mode is on", async (t) => {
   assert.equal((await call("GET", `/api/events/${id}/manage`, null, as("host@gmail.com"))).status, 200);
   assert.equal((await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP, headers: { "x-selae-host-key": hostKey } })).status, 200);
   assert.equal((await call("POST", "/api/matcher/reset", null, as("boss@gmail.com"))).status, 200);
+
+  // A host key left in a shared browser doesn't give a signed-in student the event
+  const withKey = { from: LAPTOP, headers: { authorization: "Bearer ana@gmail.com", "x-selae-host-key": hostKey } };
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, withKey)).status, 403);
+  assert.equal((await call("GET", `/api/events/${id}`, null, withKey)).json.canManage, false);
+  // ...while the organization's own account still manages it with or without one
+  assert.equal((await call("GET", `/api/events/${id}/manage`, null, { from: LAPTOP, headers: { authorization: "Bearer host@gmail.com", "x-selae-host-key": hostKey } })).status, 200);
 });
 
 test("a new org gets an emailed temporary password, and must choose its own before doing anything", async (t) => {

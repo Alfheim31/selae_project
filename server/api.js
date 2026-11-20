@@ -54,6 +54,9 @@ function canManage(req, event) {
   // Venue mode only: the laptop running SELAE manages every event
   if (req.isLaptop) return true;
   if (event.orgId && req.orgIds && req.orgIds.has(event.orgId)) return true;
+  // Signed in, the account decides: its organization, or one where it's an officer. A host key left in
+  // the browser by someone else must not hand a student the dashboard.
+  if (req.user) return false;
   const key = req.headers["x-selae-host-key"];
   if (!key) return false;
   const keys = String(key).split(",").map((k) => k.trim());
