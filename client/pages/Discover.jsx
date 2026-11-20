@@ -4,7 +4,7 @@ import { EventDrawer } from "../components/EventDrawer.jsx";
 import { CATEGORIES, EventPass } from "../components/EventPass.jsx";
 import { fmtDate, fmtTime, go, goBack, skyOf, Trails } from "../components/shared.jsx";
 import { DiscoverSkeleton, ErrorBox, usePolled } from "../components/ui.jsx";
-import { useMe } from "../lib/account.js";
+import { returnTo, useMe } from "../lib/account.js";
 import { api, follows } from "../lib/api.js";
 import { hostsEvent, useTickets } from "../lib/tickets.js";
 
@@ -20,7 +20,13 @@ function boardStatus(e, now = Date.now()) {
 }
 
 export function Discover({ drawerId }) {
-  const { me } = useMe();
+  const { me, session } = useMe();
+  const uid = session ? session.user.id : null;
+  // Following belongs to an account: signed out, the button takes you to sign in and back here
+  const follow = (name) => {
+    if (!uid) { returnTo.set(); go("profile"); return; }
+    follows.toggle(uid, name); bump((x) => x + 1);
+  };
   const [events, error] = usePolled(() => api.events(), [], 10000);
   const tickets = useTickets();
   const [cat, setCat] = useState(null);
@@ -113,7 +119,7 @@ export function Discover({ drawerId }) {
             </div>
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))" }}>
               {calendars.map((c) => {
-                const following = follows.has(c.name);
+                const following = follows.has(uid, c.name);
                 return (
                   <div key={c.name} className="cal" aria-pressed={cal === c.name} style={{ "--c-bg": skyOf(c.color) }}>
                     <div className="flex items-start gap-3">
@@ -129,7 +135,7 @@ export function Discover({ drawerId }) {
                         <Calendar size={15} /> {cal === c.name ? "Showing" : "Events"}
                       </button>
                       <button className={`btn btn-sm ${following ? "btn-primary" : ""}`} aria-pressed={following}
-                        onClick={() => { follows.toggle(c.name); bump((x) => x + 1); }}>
+                        title={uid ? undefined : "Sign in to follow"} onClick={() => follow(c.name)}>
                         {following ? <><BellRing size={15} /> Following</> : <><UserPlus size={15} /> Follow</>}
                       </button>
                     </div>

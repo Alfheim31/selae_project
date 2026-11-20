@@ -22,13 +22,18 @@ export const hostKeys = {
 // They now come from the account (/api/me → tickets); the old browser copy is cleared.
 try { localStorage.removeItem(TICKETS); } catch { /* private mode */ }
 
+// Calendars each account follows, kept per account so whoever signs in next on the same browser
+// doesn't inherit them. Signed out (no uid) there is nothing to follow.
+const followMap = () => { const all = load(FOLLOWS, {}); return all && typeof all === "object" && !Array.isArray(all) ? all : {}; };
 export const follows = {
-  all: () => load(FOLLOWS, []),
-  has: (name) => follows.all().some((n) => n.toLowerCase() === String(name).toLowerCase()),
-  toggle(name) {
-    const list = follows.all();
-    save(FOLLOWS, follows.has(name) ? list.filter((n) => n.toLowerCase() !== name.toLowerCase()) : [...list, name]);
-    return follows.has(name);
+  all: (uid) => (uid ? followMap()[uid] || [] : []),
+  has: (uid, name) => follows.all(uid).some((n) => n.toLowerCase() === String(name).toLowerCase()),
+  toggle(uid, name) {
+    if (!uid) return false;
+    const list = follows.all(uid);
+    const next = follows.has(uid, name) ? list.filter((n) => n.toLowerCase() !== name.toLowerCase()) : [...list, name];
+    save(FOLLOWS, { ...followMap(), [uid]: next });
+    return follows.has(uid, name);
   },
 };
 

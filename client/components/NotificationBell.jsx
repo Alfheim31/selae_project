@@ -34,7 +34,7 @@ export function NotificationBell({ uid }) {
   const [data, setData] = useState(null);
   const [lastSeen, setLastSeen] = useState(seen.get(uid));
   const box = useRef(null);
-  const load = useCallback(() => api.notifications().then(setData).catch(() => {}), []);
+  const load = useCallback(() => api.notifications(uid).then(setData).catch(() => {}), [uid]);
   useEffect(() => {
     setData(null);
     setLastSeen(seen.get(uid));
