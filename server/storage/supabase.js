@@ -23,11 +23,11 @@ function missingTable(error) {
 
 function explain(error, what) {
   if (missingTable(error)) {
-    return new Error(`SELAE can't find its tables in Supabase (${error.message}). Open the SQL editor of your project, run server/storage/supabase.sql `
-      + "(a new project) or server/storage/migrate-to-columns.sql (a project made before the columns), then start again.");
+    return new Error(`SELAE can't find its tables in Supabase (${error.message}). Create them in the SQL editor of your project `
+      + "with SELAE's setup SQL (kept outside the repository), then start again.");
   }
   if (/column .* does not exist|Could not find the .* column/i.test(error.message || "")) {
-    return new Error(`SELAE's tables in Supabase don't have their columns yet (${error.message}). Run server/storage/migrate-to-columns.sql in the SQL editor, then start again.`);
+    return new Error(`SELAE's tables in Supabase don't have their columns yet (${error.message}). Add them with SELAE's setup SQL in the SQL editor, then start again.`);
   }
   return new Error(`SELAE couldn't ${what} in Supabase: ${error.message || error}`);
 }
@@ -47,7 +47,14 @@ async function readAll(client, table) {
   return rows;
 }
 
-export async function openSupabaseStore({ url, key, client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) }) {
+// Every request to Supabase gives up after this long. Without it, a Supabase that doesn't answer leaves the
+// server waiting forever at start, and the host (Render) only says "no open ports" after 15 minutes.
+const REQUEST_TIMEOUT_MS = 45_000;
+const fetchWithTimeout = (input, init = {}) => fetch(input, { ...init, signal: init.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+
+export async function openSupabaseStore({ url, key, client = createClient(url, key, {
+  auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: fetchWithTimeout },
+}) }) {
   // Load everything, or seed an empty project
   const byTable = new Map();
   for (const spec of TABLES) {
@@ -59,7 +66,7 @@ export async function openSupabaseStore({ url, key, client = createClient(url, k
     const probe = await client.from(spec.table).select(cols.join(",")).limit(1);
     if (probe.error) {
       throw new Error(`SELAE's "${spec.table}" table in Supabase is missing a column (${probe.error.message}). `
-        + "Run server/storage/add-columns.sql in the SQL editor, then start again.");
+        + "Add it with SELAE's setup SQL in the SQL editor, then start again.");
     }
   }
   const stateRows = (await readAll(client, LEGACY_STATE)) || [];

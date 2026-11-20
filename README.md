@@ -119,12 +119,10 @@ Sign-in uses Supabase Auth (email and password with an emailed code, or Google).
 SELAE keeps its data in **Supabase** (Postgres plus Storage) when a `.env` file
 names a project, and otherwise in a local JSON file. To use Supabase:
 
-1. Create a project at supabase.com. In **SQL Editor**, paste `server/storage/supabase.sql`
-   and run it once. It creates the tables (`events`, `event_photos`, `registrations`, `logs`,
-   `ocr_scans`, `directory`, `profiles`, `orgs`, `org_members`, `notices`, `settings`) and a
-   public `uploads` bucket for photos. A project made before the columns runs
-   `server/storage/migrate-to-columns.sql` instead, starts the server once, then runs
-   `server/storage/finish-columns.sql`.
+1. Create a project at supabase.com. In **SQL Editor**, run SELAE's setup SQL once (kept
+   outside this repository; ask the maintainers). It creates the tables (`events`, `event_photos`,
+   `registrations`, `logs`, `ocr_scans`, `directory`, `profiles`, `orgs`, `org_members`, `notices`,
+   `settings`) and a public `uploads` bucket for photos.
 2. Copy `.env.example` to `.env` and fill in the **Project URL** and the
    **service_role** key from Project Settings → API. The key stays on the server;
    phones never see it.
@@ -342,7 +340,6 @@ server/
   storage/
     store.js           physical layer: picks Supabase or the JSON data file; atomic file writes
     supabase.js        Supabase store: one table per collection, photos in Storage, changed rows only
-    supabase.sql       the tables and bucket to create once in the Supabase SQL editor
     columns.js         which column of which table each field of a record goes to
   seed/
     seed.js            demo events, past history and student directory for the first run

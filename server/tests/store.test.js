@@ -272,12 +272,12 @@ test("a project saved as JSON before the columns moves into them on the next sta
 
 test("a missing table stops the start with what to run", async (t) => {
   t.mock.method(console, "log", () => {});
-  await assert.rejects(supa({ missing: ["settings"] }), /migrate-to-columns\.sql/);
+  await assert.rejects(supa({ missing: ["settings"] }), /can't find its tables/);
 });
 
 test("a missing column stops the start instead of failing every save", async (t) => {
   t.mock.method(console, "log", () => {});
-  await assert.rejects(supa({ missingColumns: ["orgs.disabled_at"] }), /"orgs" table .* missing a column .*add-columns\.sql/);
+  await assert.rejects(supa({ missingColumns: ["orgs.disabled_at"] }), /"orgs" table .* missing a column .*setup SQL/);
 });
 
 test("a failed write stays pending and goes through on the next flush", async (t) => {
