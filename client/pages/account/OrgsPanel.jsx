@@ -29,7 +29,7 @@ const typeLabel = (t) => (ORG_TYPES.find(([k]) => k === t) || [null, "Uncategori
 const FILTERS = [["all", "All"], ["council", "Council"], ["academic", "Academic"], ["nonacademic", "Non-academic"], ["religious", "Religious"]];
 
 // Each org keeps one sky color, picked from its id
-const skyFor = (id) => {
+export const skyFor = (id) => {
   const keys = Object.keys(COLORS);
   let h = 0;
   for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -41,7 +41,7 @@ const initials = (name) => {
   return (caps.length >= 2 ? caps.slice(0, 2) : [name[0]]).join("").toUpperCase();
 };
 
-const ORGS_CSS = `
+export const ORGS_CSS = `
 .orgstat{display:flex;align-items:center;gap:.8rem;padding:1rem 1.1rem}
 .orgstat .ic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .orgstat .n{font-family:var(--f-display);font-weight:700;font-size:1.9rem;line-height:1}

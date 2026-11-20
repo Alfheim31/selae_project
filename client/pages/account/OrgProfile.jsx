@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Building2, Camera, ImagePlus, LogOut, Trash2, Users } from "lucide-react";
+import { Building2, Camera, ImagePlus, Trash2, Users } from "lucide-react";
 import { Avatar } from "../../components/AccountMenu.jsx";
 import { prepareImage, toast, Trails } from "../../components/shared.jsx";
 import { ErrorBox } from "../../components/ui.jsx";
@@ -10,7 +10,7 @@ import { ORG_TYPES } from "./OrgsPanel.jsx";
 const TYPE_LABEL = Object.fromEntries(ORG_TYPES);
 
 /* Organization account: a wide cover and photo of its own, like the superadmin's page, with its officers under it */
-export function OrgProfile({ me, joined, onChange, onSignOut }) {
+export function OrgProfile({ me, joined, onChange }) {
   const org = me.org;
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -21,7 +21,8 @@ export function OrgProfile({ me, joined, onChange, onSignOut }) {
     if (!file) return;
     setBusy(kind); setError("");
     try {
-      const blob = await prepareImage(file, { max: kind === "cover" ? 1800 : 600 });
+      // The photo shows at most about 150px wide, so 400px is sharp even on a phone screen
+      const blob = await prepareImage(file, { max: kind === "cover" ? 1600 : 400 });
       await api.uploadOrgImage(kind, blob);
       await onChange();
       toast(`${label[kind]} updated.`);
@@ -90,7 +91,6 @@ export function OrgProfile({ me, joined, onChange, onSignOut }) {
           <nav className="flex gap-1" aria-label="Profile sections">
             <span className="toplink" aria-current="page" style={{ cursor: "default" }}><Users size={16} /> Officers</span>
           </nav>
-          <button className="btn btn-sm" onClick={onSignOut}><LogOut size={15} /> Sign out</button>
         </div>
       </section>
       <OfficersPanel />

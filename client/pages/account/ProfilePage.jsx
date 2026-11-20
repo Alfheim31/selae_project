@@ -2,7 +2,7 @@ import { LayoutGrid, LogOut, ShieldCheck } from "lucide-react";
 import { Avatar } from "../../components/AccountMenu.jsx";
 import { fmtDate, go, goBack, Trails } from "../../components/shared.jsx";
 import { displayName, returnTo, ROLE_LABEL, useMe } from "../../lib/account.js";
-import { signOut } from "../../lib/auth.js";
+import { confirmSignOut } from "../../lib/auth.js";
 import { AuthForm } from "./AuthForm.jsx";
 import { InvitesPanel } from "./InvitesPanel.jsx";
 import { OfficersPanel } from "./OfficersPanel.jsx";
@@ -14,7 +14,7 @@ import { ProfileSkeleton } from "../../components/ui.jsx";
 /* ---------------- profile: filled in once, used for every event ---------------- */
 export function ProfilePage({ required = false }) {
   const { me, reload, session } = useMe();
-  const signOutHere = async () => { await signOut(); go(""); };
+  const signOutHere = async () => { if (await confirmSignOut()) go(""); };
 
   if (me === undefined) return <ProfileSkeleton />;
   if (!me) return <div className="narrow py-10"><AuthForm /></div>;
@@ -49,7 +49,6 @@ export function ProfilePage({ required = false }) {
             <nav className="flex gap-1" aria-label="Profile sections">
               <span className="toplink" aria-current="page" style={{ cursor: "default" }}><LayoutGrid size={16} /> Admin console</span>
             </nav>
-            <button className="btn btn-sm" onClick={signOutHere}><LogOut size={15} /> Sign out</button>
           </div>
         </section>
         <OrgsPanel />
@@ -59,7 +58,7 @@ export function ProfilePage({ required = false }) {
 
   // Organization: the same wide layout, with a cover and photo the organization uploads, and its officers under it
   if (me.role === "org" && me.org) {
-    return <OrgProfile me={me} joined={joined} onChange={reload} onSignOut={signOutHere} />;
+    return <OrgProfile me={me} joined={joined} onChange={reload} />;
   }
 
   return (
