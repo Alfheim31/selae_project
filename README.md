@@ -316,9 +316,10 @@ real), and the held-out scores there become the ones to report.
 2. On the laptop, open the event's dashboard, press **Open scanner** and allow the camera.
 3. Hold the ID up to the webcam, close and steady. There is no button and no set
    position: it checks in by itself once it has read the student number twice.
-   Show it again soon after and you get "Already checked in". Once the wait set by
-   `CHECKOUT_AFTER_MINUTES` in `server/api.js` has passed, a second scan checks the
-   guest out, and the guest list shows "Out at" the time.
+   Show it again soon after and you get "Already checked in". Once the event's
+   **Check out after** wait has passed (set when creating or editing the event; 30
+   minutes unless changed), a second scan checks the guest out, and the guest list
+   shows "Out at" the time.
 
 Leaving an ID in front of the camera won't repeat the result: the same number is
 ignored until it has been out of view for a minute.

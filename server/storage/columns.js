@@ -47,7 +47,7 @@ export const TABLES = [
       ["capacity", "capacity", "int"], ["starts_at", "startsAt", "time"], ["ends_at", "endsAt", "time"],
       ["visibility", "visibility", "text"], ["registration_open", "registrationOpen", "bool"], ["cover_image", "coverImage", "text"],
       ["created_at", "createdAt", "time"], ["created_by", "createdBy", "text"], ["host_key_hash", "hostKeyHash", "text"],
-      ["simulated", "simulated", "bool"],
+      ["simulated", "simulated", "bool"], ["checkout_after_minutes", "checkoutAfterMinutes", "int"],
     ],
   },
   {
@@ -131,6 +131,7 @@ export const TABLES = [
     cols: [
       ["org_id", "orgId", "text"], ["email", "email", "text"], ["status", "status", "text"], ["user_id", "userId", "text"],
       ["invited_at", "invitedAt", "time"], ["accepted_at", "acceptedAt", "time"],
+      ["role", "role", "text"], ["position", "position", "text"],
     ],
   },
   {

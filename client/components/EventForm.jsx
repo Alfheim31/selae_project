@@ -8,6 +8,9 @@ import { ErrorBox } from "./ui.jsx";
 /* ---------------- create / edit ---------------- */
 const pad = (n) => String(n).padStart(2, "0");
 
+// How long after checking in a second scan checks a guest out (the server accepts only these)
+export const CHECKOUT_CHOICES = [[15, "15 minutes"], [30, "30 minutes"], [45, "45 minutes"], [60, "1 hour"], [90, "1 hour 30 minutes"], [120, "2 hours"]];
+
 const toLocalInput = (d) => { d = new Date(d); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
 export function CoverPicker({ event, eventId, onChange, preview, onPick }) {
@@ -54,7 +57,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
     const s = new Date(); s.setDate(s.getDate() + 1); s.setHours(13, 0, 0, 0);
     const e = new Date(s.getTime() + 2 * 3600000);
     return { title: "", hostName: "", orgId: orgs && orgs.length === 1 ? orgs[0].id : "", venue: "", capacity: 100, description: "", color: "gold", visibility: "public", category: "Workshop",
-      registrationOpen: true, startsAt: toLocalInput(s), endsAt: toLocalInput(e) };
+      checkoutAfterMinutes: 30, registrationOpen: true, startsAt: toLocalInput(s), endsAt: toLocalInput(e) };
   }, []);
   const [f, setF] = useState(() => (initial
     ? { ...defaults, ...initial, startsAt: toLocalInput(initial.startsAt), endsAt: toLocalInput(initial.endsAt) }
@@ -77,7 +80,7 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
     try {
       await onSubmit({
         title: f.title, ...(orgs ? { orgId: f.orgId } : initial && initial.org ? {} : { hostName: f.hostName }), venue: f.venue, description: f.description, color: f.color, visibility: f.visibility,
-        category: f.category, capacity, startsAt: starts.toISOString(), endsAt: ends.toISOString(),
+        category: f.category, capacity, checkoutAfterMinutes: Number(f.checkoutAfterMinutes), startsAt: starts.toISOString(), endsAt: ends.toISOString(),
         ...(showRegistrationToggle ? { registrationOpen: f.registrationOpen } : {}),
       }, cover);
       setSaved(true);
@@ -144,6 +147,11 @@ export function EventForm({ initial, submitLabel, onSubmit, showRegistrationTogg
               </select>
             </label>
           </div>
+          <label><span className="lbl">Check out after</span>
+            <select className="inp" value={f.checkoutAfterMinutes} onChange={set("checkoutAfterMinutes")}>
+              {CHECKOUT_CHOICES.map(([m, label]) => <option key={m} value={m}>{label}</option>)}
+            </select>
+            <span className="text-xs faint" style={{ display: "block", marginTop: 4 }}>A guest scanned again this long after checking in is checked out. Sooner, the scan counts as the same arrival.</span></label>
           <label><span className="lbl">Description <span className="faint">(optional)</span></span>
             <textarea className="inp" value={f.description} onChange={set("description")} maxLength={2000} placeholder="What should attendees know or bring?" />
             <span className="text-xs faint" style={{ display: "block", textAlign: "right", marginTop: 4 }}>{(f.description || "").length}/2000</span></label>

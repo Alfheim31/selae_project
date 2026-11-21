@@ -10,7 +10,8 @@ export const sure = (p) => (p >= 0.995 ? "over 99%" : pct(p));
 // "Scan again after 30 minutes to check them out." (the wait comes from the server)
 const afterText = (min) => {
   if (!min) return "Scan again later to check them out.";
-  const t = min % 60 === 0 ? `${min / 60} hour${min === 60 ? "" : "s"}` : `${min} minute${min === 1 ? "" : "s"}`;
+  const h = Math.floor(min / 60), m = min % 60;
+  const t = [h ? `${h} hour${h === 1 ? "" : "s"}` : "", m ? `${m} minute${m === 1 ? "" : "s"}` : ""].filter(Boolean).join(" ");
   return `Scan again after ${t} to check them out.`;
 };
 

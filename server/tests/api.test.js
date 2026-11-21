@@ -491,7 +491,7 @@ test("a deactivated organization is deleted 30 days later with its officers, unl
   const DAY = 86400000;
   const made = await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"));
   const id = made.json.org.id;
-  await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("org@gmail.com"));
+  await call("POST", "/api/org/members", { email: "ana@gmail.com", role: "officer", position: "President" }, as("org@gmail.com"));
   const ev = await call("POST", "/api/events", { title: "Kept", venue: "Hall", capacity: 10, startsAt: future(48), endsAt: future(50) }, as("org@gmail.com"));
   assert.equal(ev.status, 200);
 
@@ -525,13 +525,13 @@ test("an org invites a student as officer, the student accepts, and the org can 
   await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"));
 
   // Students can't manage officers, and orgs can't invite admin or org accounts
-  assert.equal((await call("POST", "/api/org/members", { email: "ben@gmail.com" }, as("ana@gmail.com"))).status, 403);
-  assert.equal((await call("POST", "/api/org/members", { email: "boss@gmail.com" }, as("org@gmail.com"))).status, 400);
-  assert.equal((await call("POST", "/api/org/members", { email: "org@gmail.com" }, as("org@gmail.com"))).status, 400);
+  assert.equal((await call("POST", "/api/org/members", { email: "ben@gmail.com", role: "officer", position: "President" }, as("ana@gmail.com"))).status, 403);
+  assert.equal((await call("POST", "/api/org/members", { email: "boss@gmail.com", role: "officer", position: "President" }, as("org@gmail.com"))).status, 400);
+  assert.equal((await call("POST", "/api/org/members", { email: "org@gmail.com", role: "officer", position: "President" }, as("org@gmail.com"))).status, 400);
 
-  const inv = await call("POST", "/api/org/members", { email: "Ana@Gmail.com" }, as("org@gmail.com"));
+  const inv = await call("POST", "/api/org/members", { email: "Ana@Gmail.com", role: "officer", position: "President" }, as("org@gmail.com"));
   assert.equal(inv.json.member.status, "invited");
-  assert.equal((await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("org@gmail.com"))).status, 409);
+  assert.equal((await call("POST", "/api/org/members", { email: "ana@gmail.com", role: "officer", position: "President" }, as("org@gmail.com"))).status, 409);
 
   // Only the invited student can answer
   const invite = (await me("ana@gmail.com")).invites[0];
@@ -548,7 +548,7 @@ test("an org invites a student as officer, the student accepts, and the org can 
   assert.equal((await me("ana@gmail.com")).officerOf.length, 0);
 
   // A declined invitation is gone
-  const again = await call("POST", "/api/org/members", { email: "ben@gmail.com" }, as("org@gmail.com"));
+  const again = await call("POST", "/api/org/members", { email: "ben@gmail.com", role: "officer", position: "President" }, as("org@gmail.com"));
   await call("POST", `/api/me/invites/${again.json.member.id}/decline`, null, as("ben@gmail.com"));
   assert.equal((await call("GET", "/api/org/members", null, as("org@gmail.com"))).json.members.length, 0);
 });
@@ -573,7 +573,7 @@ test("only an org and its officers create and manage the org's events", async (t
   // A student can't manage it until the org makes them an officer
   const edit = (who) => call("PATCH", `/api/events/${id}`, { venue: "Hall" }, as(who));
   assert.equal((await edit("ana@gmail.com")).status, 403);
-  const inv = await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("host@gmail.com"));
+  const inv = await call("POST", "/api/org/members", { email: "ana@gmail.com", role: "officer", position: "President" }, as("host@gmail.com"));
   await call("POST", `/api/me/invites/${inv.json.member.id}/accept`, null, as("ana@gmail.com"));
   assert.equal((await edit("ana@gmail.com")).status, 200);
   assert.deepEqual((await call("GET", "/api/me", null, as("ana@gmail.com"))).json.user.hostsFor, [{ id: "test-org", name: "Test Org" }]);
@@ -621,7 +621,7 @@ test("invitations, answers, removals, and new org events all reach the bell", as
   const fields = { title: "Jam", venue: "Lab", capacity: 30, startsAt: future(24), endsAt: future(26) };
 
   // The student sees the invitation
-  const inv = await call("POST", "/api/org/members", { email: "ana@gmail.com" }, as("host@gmail.com"));
+  const inv = await call("POST", "/api/org/members", { email: "ana@gmail.com", role: "officer", position: "President" }, as("host@gmail.com"));
   assert.ok((await kinds("ana@gmail.com")).includes("invite"));
   assert.ok(!(await kinds("ben@gmail.com")).includes("invite"));
 
@@ -637,7 +637,7 @@ test("invitations, answers, removals, and new org events all reach the bell", as
   assert.ok(!(await kinds("ana@gmail.com")).includes("orgEvent"));
 
   // Declining reaches the org; removing reaches the student
-  const inv2 = await call("POST", "/api/org/members", { email: "ben@gmail.com" }, as("host@gmail.com"));
+  const inv2 = await call("POST", "/api/org/members", { email: "ben@gmail.com", role: "officer", position: "President" }, as("host@gmail.com"));
   await call("POST", `/api/me/invites/${inv2.json.member.id}/decline`, null, as("ben@gmail.com"));
   assert.ok((await kinds("host@gmail.com")).includes("declined"));
   const officer = (await call("GET", "/api/org/members", null, as("host@gmail.com"))).json.members.find((m) => m.email === "ana@gmail.com");
@@ -775,4 +775,62 @@ test("a second scan after a few minutes checks the guest out, once", async (t) =
   assert.equal((await scan()).outcome, "dupout");
   const me = await call("GET", "/api/me", null, { headers: { authorization: "Bearer s:2099-00001" } });
   assert.equal(me.json.user.eventsAttended, 1);
+});
+
+test("the event's organizers choose how long until a second scan checks a guest out", async (t) => {
+  const { store, call, event, register } = setup(t);
+  const { id } = await event();
+  assert.equal((await call("GET", `/api/events/${id}`)).json.checkoutAfterMinutes, 30);
+  assert.equal((await call("PATCH", `/api/events/${id}`, { checkoutAfterMinutes: 7 }, { from: LAPTOP })).status, 400);
+  const saved = await call("PATCH", `/api/events/${id}`, { checkoutAfterMinutes: 60 }, { from: LAPTOP });
+  assert.equal(saved.json.checkoutAfterMinutes, 60);
+  await register(id, "2099-00001");
+  const scan = async () => (await call("POST", `/api/events/${id}/checkin`, { studentId: "2099-00001", method: "face", confidence: 0.9 }, { from: LAPTOP })).json;
+  assert.equal((await scan()).outcome, "approved");
+  // 45 minutes in: past the default, but not this event's hour
+  const backdate = (min) => store.mutate(() => { regOf(store, id, "2099-00001").checkin.time = new Date(Date.now() - min * 60000).toISOString(); });
+  backdate(45);
+  const early = await scan();
+  assert.equal(early.outcome, "dup");
+  assert.equal(early.checkoutAfterMinutes, 60);
+  backdate(61);
+  assert.equal((await scan()).outcome, "checkout");
+});
+
+test("an org invites a student as officer with a position, or as a member who can't run its events", async (t) => {
+  const { call } = setup(t);
+  const as = (token) => ({ headers: { authorization: `Bearer ${token}` } });
+  const me = async (token) => (await call("GET", "/api/me", null, as(token))).json.user;
+  await call("POST", "/api/admin/orgs", { name: "JPCS", email: "org@gmail.com", type: "academic" }, as("boss@gmail.com"));
+  const invite = (body) => call("POST", "/api/org/members", body, as("org@gmail.com"));
+
+  // A role is needed, and an officer needs a position
+  assert.equal((await invite({ email: "ana@gmail.com" })).status, 400);
+  assert.equal((await invite({ email: "ana@gmail.com", role: "officer", position: "  " })).status, 400);
+  const off = await invite({ email: "ana@gmail.com", role: "officer", position: "Secretary" });
+  assert.equal(off.json.member.role, "officer");
+  assert.equal(off.json.member.position, "Secretary");
+  // A member's position is never kept
+  const mem = await invite({ email: "ben@gmail.com", role: "member", position: "President" });
+  assert.equal(mem.json.member.role, "member");
+  assert.equal(mem.json.member.position, "");
+
+  const ben = await me("ben@gmail.com");
+  assert.equal(ben.invites[0].role, "member");
+  assert.equal((await me("ana@gmail.com")).invites[0].position, "Secretary");
+  await call("POST", `/api/me/invites/${off.json.member.id}/accept`, null, as("ana@gmail.com"));
+  await call("POST", `/api/me/invites/${mem.json.member.id}/accept`, null, as("ben@gmail.com"));
+
+  // The officer runs events; the member belongs but can't
+  const ana = await me("ana@gmail.com");
+  assert.deepEqual(ana.officerOf.map((o) => [o.name, o.position]), [["JPCS", "Secretary"]]);
+  assert.equal(ana.hostsFor.length, 1);
+  const benNow = await me("ben@gmail.com");
+  assert.deepEqual(benNow.memberOf.map((o) => o.name), ["JPCS"]);
+  assert.equal(benNow.officerOf.length, 0);
+  assert.equal(benNow.hostsFor.length, 0);
+  const fields = { title: "Meet", venue: "Lab", capacity: 30, startsAt: future(24), endsAt: future(26) };
+  assert.equal((await call("POST", "/api/events", fields, as("ben@gmail.com"))).status, 403);
+  assert.equal((await call("POST", "/api/events", fields, as("ana@gmail.com"))).status, 200);
+  assert.equal((await call("GET", "/api/admin/orgs", null, as("boss@gmail.com"))).json.orgs[0].officers, 1);
 });

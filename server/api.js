@@ -62,6 +62,11 @@ function canManage(req, event) {
   const keys = String(key).split(",").map((k) => k.trim());
   return keys.some((k) => hashKey(k) === event.hostKeyHash);
 }
+// Invited as an officer (who runs the org's events) or a member (who only belongs to it). Invitations made
+// before there were members were all for officers.
+export const isOfficer = (m) => m.role !== "member";
+const roleWord = (m) => (isOfficer(m) ? "an officer" : "a member");
+
 // The active orgs this person hosts events for: their org account's org, or where they're an officer
 function hostOrgs(data, user, superadmins) {
   if (!user) return [];
@@ -69,7 +74,7 @@ function hostOrgs(data, user, superadmins) {
   const { role, org } = roleOf(data, user, superadmins);
   if (role === "org") return active.filter((o) => o.id === org.id);
   if (role !== "student") return [];
-  const mine = new Set((data.orgMembers || []).filter((m) => m.email === user.email && m.status === "active").map((m) => m.orgId));
+  const mine = new Set((data.orgMembers || []).filter((m) => m.email === user.email && m.status === "active" && isOfficer(m)).map((m) => m.orgId));
   return active.filter((o) => mine.has(o.id));
 }
 
@@ -92,7 +97,7 @@ function publicEvent(data, req, e) {
   return { ...rest, category: e.category || "General", coverImage: e.coverImage || null, photos: e.photos || [],
     hostName: org ? org.name : e.hostName || "", org: org ? { id: org.id, name: org.name } : null,
     counts: c, spotsLeft: Math.max(0, e.capacity - c.going), isPast,
-    registrationOpen: e.registrationOpen && !isPast, canManage: canManage(req, e) };
+    registrationOpen: e.registrationOpen && !isPast, checkoutAfterMinutes: checkoutMinutes(e), canManage: canManage(req, e) };
 }
 // Face data stays on the server
 function noFace(s) {
@@ -145,6 +150,11 @@ function eventFields(body, existing = {}) {
   if (has("color")) { if (!COLORS.includes(body.color)) fail(400, "Unknown cover color."); out.color = body.color; }
   if (has("visibility")) { if (!["public", "unlisted"].includes(body.visibility)) fail(400, "Unknown visibility."); out.visibility = body.visibility; }
   if (has("registrationOpen")) out.registrationOpen = Boolean(body.registrationOpen);
+  if (has("checkoutAfterMinutes")) {
+    const n = Number(body.checkoutAfterMinutes);
+    if (!CHECKOUT_CHOICES.includes(n)) fail(400, `Check-out wait must be one of ${CHECKOUT_CHOICES.join(", ")} minutes.`);
+    out.checkoutAfterMinutes = n;
+  }
   if (has("category") || !existing.category) out.category = CATEGORIES.includes(body.category) ? body.category : "General";
   return out;
 }
@@ -185,9 +195,11 @@ function addRegistration(d, event, student, extra = {}) {
 
 /* ---------- check-in rules ---------- */
 // A second scan this long after checking in checks the guest out; sooner, it's the same arrival seen twice.
-// To change it, change only the number of minutes here: the scanner's message and the tests follow it.
+// Each event's organizers pick the wait from CHECKOUT_CHOICES; events without one use the default.
 export const CHECKOUT_AFTER_MINUTES = 30;
+export const CHECKOUT_CHOICES = [15, 30, 45, 60, 90, 120];
 export const CHECKOUT_AFTER_MS = CHECKOUT_AFTER_MINUTES * 60 * 1000;
+const checkoutMinutes = (event) => (CHECKOUT_CHOICES.includes(event.checkoutAfterMinutes) ? event.checkoutAfterMinutes : CHECKOUT_AFTER_MINUTES);
 function checkIn(data, event, body, canLearn) {
   const now = new Date().toISOString();
   const method = ["qr", "barcode", "ocr", "face", "confirmed", "manual"].includes(body.method) ? body.method : "manual";
@@ -224,9 +236,10 @@ function checkIn(data, event, body, canLearn) {
     // Scanned again: checks them out. Not within the first few minutes, so the same face or ID caught
     // twice at the gate isn't taken as leaving; and only once.
     if (reg.checkout) { log("dupout", studentId); return { outcome: "dupout", time: now, student, previous: reg.checkin, checkout: reg.checkout }; }
-    if (Date.parse(now) - Date.parse(reg.checkin.time) < CHECKOUT_AFTER_MS) {
+    const wait = checkoutMinutes(event);
+    if (Date.parse(now) - Date.parse(reg.checkin.time) < wait * 60 * 1000) {
       log("dup", studentId);
-      return { outcome: "dup", time: now, student, previous: reg.checkin, checkoutAfterMinutes: CHECKOUT_AFTER_MINUTES };
+      return { outcome: "dup", time: now, student, previous: reg.checkin, checkoutAfterMinutes: wait };
     }
     reg.checkout = { time: now, method };
     log("checkout", studentId);
@@ -470,12 +483,13 @@ function notificationsFor(data, req, body, role) {
     const org = orgById.get(m.orgId);
     if (!org) continue;
     if (m.email === req.user.email && role.role === "student") {
-      if (m.status === "invited") add(m.invitedAt, { kind: "invite", orgId: org.id, text: `${org.name} invited you to be an officer. Open your profile to accept or decline.` });
-      else if (m.acceptedAt) add(m.acceptedAt, { kind: "officer", orgId: org.id, text: `You're now an officer of ${org.name}. You can create and manage its events.` });
+      if (m.status === "invited") add(m.invitedAt, { kind: "invite", orgId: org.id, text: `${org.name} invited you to be ${roleWord(m)}${isOfficer(m) && m.position ? ` (${m.position})` : ""}. Open your profile to accept or decline.` });
+      else if (m.acceptedAt) add(m.acceptedAt, { kind: "officer", orgId: org.id, text: isOfficer(m)
+        ? `You're now an officer of ${org.name}. You can create and manage its events.` : `You're now a member of ${org.name}.` });
     }
     // The org account hears who accepted
     if (role.role === "org" && role.org.id === org.id && m.status === "active" && m.acceptedAt) {
-      add(m.acceptedAt, { kind: "accepted", orgId: org.id, text: `${personName(data, m.email)} accepted your invitation and is now an officer.` });
+      add(m.acceptedAt, { kind: "accepted", orgId: org.id, text: `${personName(data, m.email)} accepted your invitation and is now ${roleWord(m)}.` });
     }
   }
 
@@ -604,7 +618,8 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
   // Who the officer is, from their student profile when they have one
   const memberView = (m) => {
     const p = Object.values(store.data.profiles || {}).find((x) => x.email === m.email);
-    return { id: m.id, email: m.email, status: m.status, invitedAt: m.invitedAt, acceptedAt: m.acceptedAt || null,
+    return { id: m.id, email: m.email, status: m.status, role: isOfficer(m) ? "officer" : "member", position: isOfficer(m) ? m.position || "" : "",
+      invitedAt: m.invitedAt, acceptedAt: m.acceptedAt || null,
       name: p ? `${p.last}, ${p.first}${p.middle ? ` ${p.middle}.` : ""}` : null, section: p ? p.section : null };
   };
   const membersOf = (orgId) => (store.data.orgMembers || []).filter((m) => m.orgId === orgId).map(memberView)
@@ -667,8 +682,9 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
           .map((r) => ({ code: r.code, eventId: r.eventId })),
         // Events this account was checked in at (the simulated history isn't anyone's)
         eventsAttended: store.data.registrations.filter((r) => r.userId === req.user.id && r.checkin).length,
-        officerOf: mine.filter((m) => m.status === "active").map(brief),
-        invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m) })) } };
+        officerOf: mine.filter((m) => m.status === "active" && isOfficer(m)).map((m) => ({ ...brief(m), position: m.position || "" })),
+        memberOf: mine.filter((m) => m.status === "active" && !isOfficer(m)).map(brief),
+        invites: mine.filter((m) => m.status === "invited").map((m) => ({ id: m.id, org: brief(m), role: isOfficer(m) ? "officer" : "member", position: m.position || "" })) } };
     }],
 
     // The events this account was checked in at, newest first: for the profile's "Events attended" tab
@@ -761,22 +777,24 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       if (email === org.email) fail(400, "That's this organization's own account.");
       if (admins.includes(email) || (store.data.orgs || []).some((o) => o.email === email)) fail(400, "That email is an admin or organization account, not a student.");
       const existing = (store.data.orgMembers || []).find((m) => m.orgId === org.id && m.email === email);
-      if (existing) fail(409, existing.status === "active" ? "That student is already an officer." : "That student already has an invitation.");
+      if (!["officer", "member"].includes(b.role)) fail(400, "Choose Officer or Member.");
+      const position = b.role === "officer" ? str(b.position, "Position", { max: 60 }).replace(/\s+/g, " ") : "";
+      if (existing) fail(409, existing.status === "active" ? `That student is already ${roleWord(existing)}.` : "That student already has an invitation.");
       return store.mutate((d) => {
         d.orgMembers = d.orgMembers || [];
-        const member = { id: newId(), orgId: org.id, email, status: "invited", invitedAt: new Date().toISOString() };
+        const member = { id: newId(), orgId: org.id, email, status: "invited", role: b.role, position, invitedAt: new Date().toISOString() };
         d.orgMembers.push(member);
         return { member: memberView(member) };
       });
     }],
 
-    // Removes an officer, or takes back an invitation
+    // Removes an officer or member, or takes back an invitation
     ["DELETE", /^\/api\/org\/members\/([\w-]+)$/, (req, [id]) => {
       const org = requireOrg(req);
-      const member = (store.data.orgMembers || []).find((m) => m.id === id && m.orgId === org.id) || fail(404, "Officer not found.");
+      const member = (store.data.orgMembers || []).find((m) => m.id === id && m.orgId === org.id) || fail(404, "That person isn't in this organization.");
       return store.mutate((d) => {
         d.orgMembers = d.orgMembers.filter((m) => m !== member);
-        if (member.status === "active") addNotice(d, member.email, { kind: "removed", orgId: org.id, text: `${org.name} removed you as an officer.` });
+        if (member.status === "active") addNotice(d, member.email, { kind: "removed", orgId: org.id, text: `${org.name} removed you as ${roleWord(member)}.` });
         return { removed: true };
       });
     }],
@@ -786,13 +804,13 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       const user = requireUser(req);
       const member = (store.data.orgMembers || []).find((m) => m.id === id && m.email === user.email && m.status === "invited")
         || fail(404, "That invitation is no longer open.");
-      if (roleOf(store.data, user, admins).role !== "student") fail(403, "Only student accounts can be officers.");
+      if (roleOf(store.data, user, admins).role !== "student") fail(403, "Only student accounts can join an organization.");
       return store.mutate((d) => {
         if (answer === "accept") Object.assign(member, { status: "active", userId: user.id, acceptedAt: new Date().toISOString() });
         else {
           d.orgMembers = d.orgMembers.filter((m) => m !== member);
           const org = d.orgs.find((o) => o.id === member.orgId);
-          if (org) addNotice(d, org.email, { kind: "declined", orgId: org.id, text: `${personName(d, user.email)} declined your officer invitation.` });
+          if (org) addNotice(d, org.email, { kind: "declined", orgId: org.id, text: `${personName(d, user.email)} declined your invitation to be ${roleWord(member)}.` });
         }
         return { ok: true };
       });
@@ -839,7 +857,7 @@ export function createApi(store, { verify = supabaseVerifier(), superadmins = pr
       return { orgs: [...(d.orgs || [])].sort((a, b) => (Boolean(a.disabled) - Boolean(b.disabled)) || a.name.localeCompare(b.name)).map((o) => ({ ...o,
         events: d.events.filter((e) => e.orgId === o.id).length,
         upcoming: d.events.filter((e) => e.orgId === o.id && new Date(e.endsAt).getTime() > now).length,
-        officers: (d.orgMembers || []).filter((m) => m.orgId === o.id && m.status === "active").length })) };
+        officers: (d.orgMembers || []).filter((m) => m.orgId === o.id && m.status === "active" && isOfficer(m)).length })) };
     }],
 
     ["POST", /^\/api\/admin\/orgs$/, async (req) => {

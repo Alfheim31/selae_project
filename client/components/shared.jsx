@@ -217,6 +217,8 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 @keyframes fade{from{opacity:0}to{opacity:1}}
 /* organizer console */
 .rail{background:var(--g-pass);color:#fff;position:relative;border-right:2px dashed rgba(255,255,255,.45)}
+/* The sidebar stays put under the top bar while the content scrolls; on a short window it scrolls on its own */
+@media (min-width:768px){.rail{position:sticky;top:65px;height:calc(100vh - 65px);overflow-y:auto;align-self:flex-start}}
 .rail .tag{color:rgba(255,255,255,.7)}
 .mark{width:34px;height:34px;border-radius:9px;position:relative;background:var(--accent);flex-shrink:0}
 .mark:before,.mark:after{content:"";position:absolute;width:11px;height:11px;border:3px solid var(--lime)}

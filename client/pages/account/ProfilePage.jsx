@@ -85,7 +85,8 @@ export function ProfilePage({ required = false, tab }) {
           <div className="muted" style={{ overflowWrap: "anywhere" }}>{me.email}</div>
           <div className="flex flex-wrap justify-center items-center gap-2 mt-1">
             <span className="pill host"><GraduationCap size={12} /> {ROLE_LABEL[me.role]}</span>
-            {(me.officerOf || []).map((o) => <span key={o.id} className="pill host">Officer · {o.name}</span>)}
+            {(me.officerOf || []).map((o) => <span key={o.id} className="pill host">{o.position || "Officer"} · {o.name}</span>)}
+            {(me.memberOf || []).map((o) => <span key={o.id} className="pill host">Member · {o.name}</span>)}
             {p && <span className="pill soft">Student no. {p.studentId}</span>}
             {p && p.section && <span className="pill soft">{p.section}</span>}
             <span className="pill soft">Signs in with {me.viaGoogle ? "Google" : "email"}</span>
