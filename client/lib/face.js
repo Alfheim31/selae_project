@@ -11,7 +11,25 @@ const detectorOptions = new faceapi.TinyFaceDetectorOptions({
   scoreThreshold: 0.5,
 });
 
+// face-api's TensorFlow bundle ranks its WebAssembly backend first, but that backend needs its own .wasm files
+// and isn't ready when detection starts ("backend 'wasm' has not yet been initialized"). Pick a backend
+// ourselves, the graphics card first and plain JavaScript if that fails, and wait until it's ready.
+let backendReady = null;
+function ensureBackend() {
+  if (!backendReady) {
+    backendReady = (async () => {
+      const tf = faceapi.tf;
+      for (const name of ["webgl", "cpu"]) {
+        try { if (await tf.setBackend(name)) { await tf.ready(); return name; } } catch { /* try the next one */ }
+      }
+      throw new Error("This browser can't run the face detector.");
+    })().catch((err) => { backendReady = null; throw err; });
+  }
+  return backendReady;
+}
+
 export async function ensureFaceModels() {
+  await ensureBackend();
   if (!detectorLoaded) {
     detectorLoaded = faceapi.nets.tinyFaceDetector.loadFromUri("/models").catch((err) => {
       detectorLoaded = null;

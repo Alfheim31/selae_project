@@ -13,6 +13,24 @@ function withTimeout(promise) {
   return Promise.race([promise, late]).finally(() => clearTimeout(t));
 }
 
+// While a scan runs: a spinner over the camera (or on its own for an uploaded selfie) with what's happening
+const SCAN_CSS = `
+.facebusy{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6rem;
+  background:rgba(14,20,48,.55);color:#fff;font-weight:600;text-align:center;padding:1rem;backdrop-filter:blur(1px)}
+.facebusy .spin{width:38px;height:38px;border-color:rgba(255,255,255,.3);border-top-color:#fff}
+.facebusy small{font-weight:500;opacity:.85;max-width:30ch}
+.facebar{display:flex;align-items:center;gap:.7rem;padding:.7rem .8rem;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+`;
+function ScanBusy({ overlay, text }) {
+  const hint = "The first scan also downloads the face model, so it can take a while.";
+  return overlay ? (
+    <div className="facebusy" role="status" aria-live="polite"><div className="spin" /> {text}<small>{hint}</small></div>
+  ) : (
+    <div className="facebar text-sm" role="status" aria-live="polite"><div className="spin" style={{ width: 20, height: 20, borderWidth: 2.5 }} />
+      <span>{text} <span className="muted" style={{ fontWeight: 400 }}>{hint}</span></span></div>
+  );
+}
+
 // Shown before any face scan, under the Data Privacy Act of 2012 (RA 10173)
 export function PrivacyNotice() {
   return (
@@ -101,6 +119,7 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
 
   return (
     <div className="panel p-4 flex flex-col gap-3" style={{ background: "var(--raised)" }}>
+      <style>{SCAN_CSS}</style>
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="lbl" style={{ marginBottom: 2 }}>Facial registration (Required)</div>
@@ -154,6 +173,7 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         <div className="flex flex-col gap-2">
           <div className="viewfinder" style={{ maxHeight: 280 }}>
             <video ref={cam.videoRef} autoPlay playsInline muted />
+            {scanningFace && <ScanBusy overlay text="Scanning your face…" />}
           </div>
           {cam.devices.length > 1 && (
             <select className="camselect" aria-label="Camera" value={camId || ""}
@@ -190,6 +210,8 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         hidden
         onChange={(e) => captureFromFile(e.target.files[0])}
       />
+
+      {scanningFace && !camOpen && <ScanBusy text="Analyzing your photo…" />}
 
       {!camOpen && agreed && (
         <div className="flex flex-wrap gap-2">
