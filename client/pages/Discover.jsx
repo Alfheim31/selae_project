@@ -60,6 +60,28 @@ export function Discover({ drawerId }) {
   };
   const filtered = cat || cal || q.trim();
   const mine = upcoming.filter((e) => tickets.has(e.id) && tickets.get(e.id).status !== "cancelled");
+  // While searching, the results come first, right under the search box, instead of below the other sections
+  const searching = Boolean(q.trim());
+  const toResults = () => document.getElementById("res-h")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const resultsSection = (
+      <section className="flex flex-col gap-3" aria-labelledby="res-h">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 id="res-h" className="panel-title" style={{ fontSize: "1.6rem", scrollMarginTop: 96 }}>
+            {filtered ? [cal, cat, q.trim() && `“${q.trim()}”`].filter(Boolean).join(" · ") : "All upcoming"}
+          </h2>
+          <span className="tag">{results.length} event{results.length === 1 ? "" : "s"}</span>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {results.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} hosting={hostsEvent(me, e)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
+        </div>
+        {events && !results.length && (
+          <div className="panel p-6 text-center flex flex-col items-center gap-3">
+            <p className="muted">No upcoming events match. Try another category or search.</p>
+            <button className="btn" onClick={() => { setCat(null); setCal(null); setQ(""); }}>Clear filters</button>
+          </div>
+        )}
+      </section>
+  );
 
   return (
     <>
@@ -75,6 +97,7 @@ export function Discover({ drawerId }) {
             <label className="field mt-5" style={{ maxWidth: 520, display: "block" }}>
               <Search size={18} />
               <input className="input" placeholder="Search events, hosts or venues" value={q} onChange={(e) => setQ(e.target.value)} maxLength={80}
+                enterKeyHint="search" onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); toResults(); } }}
                 style={{ border: 0, boxShadow: "0 12px 30px -12px rgba(20,27,58,.45)" }} />
             </label>
           </div>
@@ -85,6 +108,8 @@ export function Discover({ drawerId }) {
       <div className="wrap py-8 flex flex-col gap-10" style={{ maxWidth: 1240 }}>
         {error && <ErrorBox message={error} />}
         {!events && !error && <DiscoverSkeleton />}
+
+        {searching && resultsSection}
 
         {me && me.role === "superadmin" && <Suspense fallback={null}><OrgReport /></Suspense>}
 
@@ -157,23 +182,7 @@ export function Discover({ drawerId }) {
           </section>
         )}
 
-        <section className="flex flex-col gap-3" aria-labelledby="res-h">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 id="res-h" className="panel-title" style={{ fontSize: "1.6rem", scrollMarginTop: 96 }}>
-              {filtered ? [cal, cat, q.trim() && `“${q.trim()}”`].filter(Boolean).join(" · ") : "All upcoming"}
-            </h2>
-            <span className="tag">{results.length} event{results.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {results.map((e) => <EventPass key={e.id} e={e} ticket={tickets.get(e.id)} hosting={hostsEvent(me, e)} active={drawerId === e.id} onOpen={() => open(e.id)} />)}
-          </div>
-          {events && !results.length && (
-            <div className="panel p-6 text-center flex flex-col items-center gap-3">
-              <p className="muted">No upcoming events match. Try another category or search.</p>
-              <button className="btn" onClick={() => { setCat(null); setCal(null); setQ(""); }}>Clear filters</button>
-            </div>
-          )}
-        </section>
+        {!searching && resultsSection}
 
         {recentPhotos.length > 0 && (
           <section className="flex flex-col gap-3">
