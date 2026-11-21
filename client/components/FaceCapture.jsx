@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Camera, CheckCircle2, ShieldCheck, Upload } from "lucide-react";
-import { extractFaceDescriptor } from "../lib/face.js";
+import { extractFaceDescriptor, modelPercent, modelText, useFaceModel } from "../lib/face.js";
 import { useCamera } from "./camera.jsx";
 
 // A scan (the first one also downloads the 94 MB face model) gives up after a minute so the student can try again.
@@ -21,13 +21,23 @@ const SCAN_CSS = `
 .facebusy small{font-weight:500;opacity:.85;max-width:30ch}
 .facebar{display:flex;align-items:center;gap:.7rem;padding:.7rem .8rem;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:600}
 `;
-function ScanBusy({ overlay, text }) {
-  const hint = "The first scan also downloads the face model, so it can take a while.";
+function ScanBusy({ overlay, text: scanning }) {
+  // While the face model downloads (the first scan on this device), say how far along it is
+  const model = useFaceModel();
+  const downloading = !model.ready && (model.loaded > 0 || model.total > 0);
+  const text = downloading ? modelText(model) : scanning;
+  const pc = modelPercent(model);
+  const hint = downloading ? "Only the first time on this device." : "The first scan also downloads the face model, so it can take a while.";
+  const bar = downloading && (
+    <div className={`vf-bar${pc === null ? " unknown" : ""}`} style={{ width: "100%", maxWidth: 260, background: overlay ? undefined : "rgba(53,80,212,.15)" }}>
+      <div style={{ ...(pc === null ? {} : { width: `${pc}%` }), background: overlay ? undefined : "var(--accent)" }} />
+    </div>
+  );
   return overlay ? (
-    <div className="facebusy" role="status" aria-live="polite"><div className="spin" /> {text}<small>{hint}</small></div>
+    <div className="facebusy" role="status" aria-live="polite"><div className="spin" /> {text}{bar}<small>{hint}</small></div>
   ) : (
     <div className="facebar text-sm" role="status" aria-live="polite"><div className="spin" style={{ width: 20, height: 20, borderWidth: 2.5 }} />
-      <span>{text} <span className="muted" style={{ fontWeight: 400 }}>{hint}</span></span></div>
+      <span className="flex-1 flex flex-col gap-1">{text} {bar}<span className="muted" style={{ fontWeight: 400 }}>{hint}</span></span></div>
   );
 }
 
@@ -77,7 +87,7 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         setFaceStatus("No face detected. Center your face in good lighting and try again.");
       } else {
         onChange(res.descriptor);
-        setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
+        setFaceStatus(`Face captured (${Math.round(res.score * 100)}% quality). Save your profile to register it.`);
         setCamOpen(false);
       }
     } catch (err) {
@@ -107,7 +117,7 @@ export function FaceCapture({ value, onChange, onError, saved = false, consent =
         setFaceStatus("Couldn't detect a clear face in that photo. Try another selfie.");
       } else {
         onChange(res.descriptor);
-        setFaceStatus(`Face registered (${Math.round(res.score * 100)}% quality).`);
+        setFaceStatus(`Face captured (${Math.round(res.score * 100)}% quality). Save your profile to register it.`);
       }
     } catch (err) {
       if (mine !== attempt.current) return;

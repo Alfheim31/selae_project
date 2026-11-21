@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleQuestionMark, TriangleAlert } from "lucide-react";
+import { Check, CircleQuestionMark, TriangleAlert } from "lucide-react";
 
 /* The app's own "are you sure?" box, in place of the browser's confirm().
    const ok = await askConfirm({ title, message, confirm: "Send password", danger: true, icon: LogOut });
    Mounted once, in App, as <ConfirmHost />. Same look as the report's download pop-up: a centred card
-   with a round icon on top and the buttons stacked under the text. */
+   with a round icon on top and the buttons stacked under the text.
+   showSuccess({ title, message }) is the green version with a single button, for "it worked". */
 
 export function askConfirm(options) {
   return new Promise((resolve) => {
     window.dispatchEvent(new CustomEvent("selae:confirm", { detail: { ...options, resolve } }));
   });
+}
+
+export function showSuccess(options) {
+  return askConfirm({ confirm: "Done", ...options, success: true });
 }
 
 const CSS = `
@@ -32,7 +37,7 @@ export function ConfirmHost() {
   useEffect(() => {
     if (!ask) return undefined;
     // A risky action starts on Cancel, so Enter alone never does it
-    (ask.danger ? no : yes).current?.focus();
+    (ask.danger && !ask.success ? no : yes).current?.focus();
     const esc = (e) => { if (e.key === "Escape") answer(false); };
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
@@ -40,16 +45,16 @@ export function ConfirmHost() {
 
   if (!ask) return null;
   function answer(ok) { ask.resolve(ok); setAsk(null); }
-  const Icon = ask.icon || (ask.danger ? TriangleAlert : CircleQuestionMark);
-  const color = ask.danger ? "var(--bad)" : "var(--accent)";
-  const glow = ask.danger ? "rgba(212,67,59,.5)" : "rgba(53,80,212,.5)";
+  const Icon = ask.icon || (ask.success ? Check : ask.danger ? TriangleAlert : CircleQuestionMark);
+  const color = ask.success ? "var(--ok)" : ask.danger ? "var(--bad)" : "var(--accent)";
+  const glow = ask.success ? "rgba(30,154,97,.55)" : ask.danger ? "rgba(212,67,59,.5)" : "rgba(53,80,212,.5)";
 
   return (
     <div className="modal-bg" onPointerDown={(e) => { if (e.target === e.currentTarget) answer(false); }}>
       <style>{CSS}</style>
       <div className="modal cf-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-h" aria-describedby="confirm-p">
         <span className="cf-badge" style={{ background: color, boxShadow: `0 10px 24px -8px ${glow}` }}>
-          <Icon size={32} strokeWidth={2.4} />
+          <Icon size={ask.success ? 34 : 32} strokeWidth={ask.success ? 3.2 : 2.4} />
         </span>
         <div id="confirm-h" className="cf-title" style={{ color }}>{ask.title}</div>
         <div id="confirm-p" className="muted text-sm cf-text">{ask.message}</div>
@@ -57,7 +62,7 @@ export function ConfirmHost() {
           <button ref={yes} className="btn" style={{ background: color, borderColor: color, color: "#fff" }} onClick={() => answer(true)}>
             {ask.confirm || "OK"}
           </button>
-          <button ref={no} className="btn btn-ghost" onClick={() => answer(false)}>{ask.cancel || "Cancel"}</button>
+          {!ask.success && <button ref={no} className="btn btn-ghost" onClick={() => answer(false)}>{ask.cancel || "Cancel"}</button>}
         </div>
       </div>
     </div>

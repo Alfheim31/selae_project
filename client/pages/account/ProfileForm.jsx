@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { showSuccess } from "../../components/ConfirmDialog.jsx";
 import { FaceCapture } from "../../components/FaceCapture.jsx";
 import { EMPTY_STUDENT, StudentFields } from "../../components/StudentFields.jsx";
 import { formatName, go, tidyInitial, tidyName, toast } from "../../components/shared.jsx";
@@ -49,9 +50,15 @@ export function ProfileForm({ me, onSaved, required = false }) {
     try {
       await api.saveProfile({ ...f, faceDescriptor, faceConsent: Boolean(faceDescriptor) && (consent === true || Boolean(p && p.hasFace)) });
       pendingStudent.clear();
+      const newFace = Boolean(faceDescriptor);
       setFaceDescriptor(null);
-      // The first save unlocks the app and this page goes away, so the pop-up lives at the app level
-      toast(p && p.hasFace ? "Profile saved." : "Profile saved. You're all set for events.");
+      // The first save unlocks the app and this page goes away, so the pop-ups live at the app level.
+      // A new face scan gets its own pop-up: it's only registered once the profile is saved.
+      if (newFace) {
+        showSuccess({ title: "Face registered", message: p && p.hasFace
+          ? "Your new face scan is saved. The scanner at the entrance will use it from now on."
+          : "Your face scan and profile are saved. You're all set: register for an event and show your face at the entrance." });
+      } else toast("Profile saved.");
       onSaved();
     } catch (err) { setError(err.message); }
     setBusy(false);

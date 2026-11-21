@@ -41,6 +41,10 @@ function tesseractAssets() {
   return { name: 'tesseract-assets', config: copy }
 }
 
+function faceModelBytes() {
+  try { return fs.statSync(path.resolve('client/public/models/selae_custom_face.onnx')).size } catch { return 0 }
+}
+
 // API inside the dev and preview servers
 function selaeApi() {
   let handle
@@ -56,6 +60,9 @@ export default defineConfig({
   envDir: path.resolve('.'),
   build: { outDir: '../dist', emptyOutDir: true },
   plugins: [tesseractAssets(), react(), tailwindcss(), selaeApi()],
+  // The face model's real size, so its download shows a percentage even when the server compresses it
+  // and doesn't say how big it is
+  define: { __FACE_MODEL_BYTES__: JSON.stringify(faceModelBytes()) },
   // LAN access
   server: { host: true },
   preview: { host: true },

@@ -3,7 +3,7 @@ import { Camera, CameraOff, CheckCircle2, Keyboard, Lock, Search, UserPlus, Volu
 import { CameraStage, HoldToExit, useBeep, useCamera } from "../../components/camera.jsx";
 import { formatName, norm } from "../../components/shared.jsx";
 import { api } from "../../lib/api.js";
-import { euclideanDistance, extractFaceDescriptor } from "../../lib/face.js";
+import { euclideanDistance, extractFaceDescriptor, modelPercent, modelText, useFaceModel } from "../../lib/face.js";
 import { digitsApart, readStudentNumber } from "../../lib/ocr.js";
 import { ResultPanel } from "./ScanResult.jsx";
 
@@ -27,6 +27,7 @@ function makeActions(data) {
 
 export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
   const { checkins, capacity, event } = data;
+  const faceModel = useFaceModel();
   const actions = useMemo(() => makeActions(data), [data]);
   const [scanMode, setScanMode] = useState("face"); // "face" | "ocr" | "both"
   const [phase, setPhase] = useState("idle");
@@ -445,12 +446,22 @@ export function Scanner({ data, eventId, refresh, gateMode, setGateMode }) {
                     : scan.kind === "error" ? "Reader error, retrying. Use manual entry for now"
                     : `Scanning (${scanMode.toUpperCase()}), ${scan.reads} ${scan.reads === 1 ? "read" : "reads"} so far`}
                 </div>
+                {/* The first time on this device the face model still has to download: show how far along it is */}
+                {scanMode !== "ocr" && !faceModel.ready && phase === "idle" && (
+                  <div className="vf-load" role="status" aria-live="polite">
+                    <span>{faceModel.total || faceModel.loaded ? modelText(faceModel) : "Getting the face reader ready…"}</span>
+                    <div className={`vf-bar${modelPercent(faceModel) === null ? " unknown" : ""}`}>
+                      <div style={modelPercent(faceModel) === null ? undefined : { width: `${modelPercent(faceModel)}%` }} />
+                    </div>
+                    <small>Only the first time on this device. Use manual entry below in the meantime.</small>
+                  </div>
+                )}
                 {(phase === "ocr" || phase === "face") && (
                   <div className="ocr-tag">
                     {phase === "face" ? "Matching facial features" : "Reading the printed student number"}
                   </div>
                 )}
-                {phase === "idle" && (
+                {phase === "idle" && (scanMode === "ocr" || faceModel.ready) && (
                   <div className="vf-note">
                     {scan.kind === "found" ? `Found ${scan.number}. Hold still, confirming`
                       : scan.kind === "same" ? "Already scanned. Step aside to scan the next person"

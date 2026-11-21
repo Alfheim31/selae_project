@@ -246,6 +246,14 @@ svg.trail{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-eve
 .viewfinder video.frozen{filter:grayscale(.15) brightness(.8)}
 .viewfinder .btn{border-color:rgba(255,255,255,.3)}
 .vf-ocr{position:absolute;right:3%;top:3.5%;z-index:3}
+/* The face model downloading: a card over the camera with a progress bar */
+.vf-load{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,86%);background:rgba(11,17,48,.86);color:#fff;
+  border-radius:14px;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.55rem;text-align:center;font-weight:600;z-index:2}
+.vf-load small{font-weight:500;opacity:.8;line-height:1.4}
+.vf-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden}
+.vf-bar > div{height:100%;border-radius:99px;background:var(--lime);transition:width .3s ease}
+.vf-bar.unknown > div{width:35%;animation:vfslide 1.2s ease-in-out infinite}
+@keyframes vfslide{from{transform:translateX(-100%)}to{transform:translateX(290%)}}
 .vf-note{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);background:rgba(11,17,48,.82);color:#fff;
   font-weight:600;font-size:.85rem;padding:.3rem .7rem;border-radius:6px;white-space:nowrap;max-width:94%;overflow:hidden;text-overflow:ellipsis}
 .vf-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.75rem;padding:1.5rem;text-align:center}
